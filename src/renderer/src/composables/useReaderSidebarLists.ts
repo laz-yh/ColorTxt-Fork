@@ -138,14 +138,12 @@ function sortFileList(
     case "sizeAsc":
       return out.sort(
         (a, b) =>
-          effectiveFileSizeBytes(a) - effectiveFileSizeBytes(b) ||
-          byName(a, b),
+          effectiveFileSizeBytes(a) - effectiveFileSizeBytes(b) || byName(a, b),
       );
     case "sizeDesc":
       return out.sort(
         (a, b) =>
-          effectiveFileSizeBytes(b) - effectiveFileSizeBytes(a) ||
-          byName(a, b),
+          effectiveFileSizeBytes(b) - effectiveFileSizeBytes(a) || byName(a, b),
       );
     case "progressAsc":
       return out.sort((a, b) => {
@@ -425,15 +423,10 @@ export function useReaderSidebarLists(
     const vl = fileListRef.value;
     const scrollHost = vl?.scrollEl as HTMLElement | undefined;
     const clientH = scrollHost?.clientHeight ?? 0;
-    if (
-      !vl ||
-      !scrollHost ||
-      clientH <= 0 ||
-      props.activeTab !== "files"
-    ) {
+    if (!vl || !scrollHost || clientH <= 0 || props.activeTab !== "files") {
       if (layoutRetry < MAX_FILE_LIST_LAYOUT_RETRIES) {
-        requestAnimationFrame(() =>
-          void ensureCurrentFileVisible(mode, layoutRetry + 1),
+        requestAnimationFrame(
+          () => void ensureCurrentFileVisible(mode, layoutRetry + 1),
         );
       }
       return;
@@ -571,12 +564,13 @@ export function useReaderSidebarLists(
       if (props.activeTab !== "files") return;
       void nextTick(() => {
         const path = props.currentFilePath;
-        if (!path) return;
-        if (filesFiltered.value.some((f) => f.path === path)) {
+        if (path && filesFiltered.value.some((f) => f.path === path)) {
           void ensureCurrentFileVisible(
             props.activeScrollMode === "center" ? "center" : "edge",
           );
+          return;
         }
+        fileListRef.value?.scrollToTop();
       });
     },
   );
