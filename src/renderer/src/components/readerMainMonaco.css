@@ -43,6 +43,35 @@
   );
 }
 
+.monaco-editor .readerInlineSearchMatch {
+  background: var(
+    --vscode-editor-findMatchHighlightBackground,
+    color-mix(in srgb, var(--search-hit-bg) 78%, transparent)
+  );
+  display: inline-block;
+  line-height: inherit;
+  border-radius: 3px;
+}
+
+.monaco-editor .readerInlineSearchCurrentMatch {
+  background: var(
+    --vscode-editor-findMatchHighlightBackground,
+    color-mix(in srgb, var(--search-hit-bg) 78%, transparent)
+  );
+  display: inline-block;
+  line-height: inherit;
+  border-radius: 3px;
+}
+
+.monaco-editor .readerInlineSearchCurrentLine {
+  background: color-mix(in srgb, var(--search-hit-bg) 26%, transparent);
+}
+
+.monaco-editor .margin-view-overlays .readerInlineSearchCurrentLineDecor,
+.monaco-editor .margin .readerInlineSearchCurrentLineDecor {
+  background: color-mix(in srgb, var(--search-hit-bg) 26%, transparent);
+}
+
 /*
  * 装饰器 / 内容 hover 外层为 `.monaco-resizable-hover`，高度常略大于内层 `.monaco-hover`；
  * Monaco 默认只给内层铺 `editorHoverWidget-background`，多出的纵向区域会透出阅读器背景；

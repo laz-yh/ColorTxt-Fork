@@ -424,7 +424,7 @@ function itemMarkBackground(it: Extract<CustomSelectItem, { kind: "item" }>) {
   gap: 6px;
   text-align: left;
   white-space: nowrap;
-  padding: 4px 4px 4px 10px;
+  padding: 4px 4px 4px 8px;
 }
 .customSelectTrigger[aria-expanded="true"] {
   color: var(--accent);

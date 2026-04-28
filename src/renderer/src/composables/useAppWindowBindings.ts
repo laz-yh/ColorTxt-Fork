@@ -66,7 +66,7 @@ export function useAppWindowBindings(deps: {
   compressBlankLines: Ref<boolean>;
   suppressFileListCenterAfterLoad: Ref<boolean>;
   txtFiles: Ref<Array<{ name: string; path: string; size: number }>>;
-  sidebarTab: Ref<"files" | "chapters" | "bookmarks" | "highlights">;
+  sidebarTab: Ref<"files" | "chapters" | "bookmarks" | "highlights" | "search">;
   currentFile: Ref<string | null>;
   dirListScanning: Ref<boolean>;
   dirListCurrentName: Ref<string>;

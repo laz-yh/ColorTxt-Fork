@@ -24,6 +24,7 @@
   --list-item-bg-hover: #f2f2f2;
   --list-item-fg-active: #000000;
   --list-item-bg-active: #e4e6f1;
+  --search-hit-bg: #f1bb90;
 
   --primary: #409eff;
   --primary-bg: #ecf5ff;
@@ -86,6 +87,7 @@ html.dark {
   --list-item-bg-hover: #2a2d2e;
   --list-item-fg-active: #ffffff;
   --list-item-bg-active: #37373d;
+  --search-hit-bg: #613214;
 
   --primary: #409eff;
   --primary-bg: #18222b;

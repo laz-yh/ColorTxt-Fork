@@ -68,7 +68,7 @@ export function useAppFileSession(deps: {
   totalLineCount: Ref<number>;
   chapters: Ref<Chapter[]>;
   activeChapterIdx: Ref<number>;
-  sidebarTab: Ref<"files" | "chapters" | "bookmarks" | "highlights">;
+  sidebarTab: Ref<"files" | "chapters" | "bookmarks" | "highlights" | "search">;
   txtFiles: Ref<TxtFileItem[]>;
   lastProbeLine: Ref<number>;
   viewportTopLine: Ref<number>;

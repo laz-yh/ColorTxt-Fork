@@ -16,6 +16,7 @@ import ChapterListPanel from "./ChapterListPanel.vue";
 import FileListPanel from "./FileListPanel.vue";
 import BookmarkListPanel from "./BookmarkListPanel.vue";
 import HighlightListPanel from "./HighlightListPanel.vue";
+import SearchPanel from "./SearchPanel.vue";
 import { icons } from "../icons";
 import {
   collectFsPathsFromDataTransfer,
@@ -24,7 +25,7 @@ import {
 
 const props = withDefaults(
   defineProps<{
-    activeTab: "files" | "chapters" | "bookmarks" | "highlights";
+    activeTab: "files" | "chapters" | "bookmarks" | "highlights" | "search";
     /** 非全屏时是否展开右侧面板列；全屏时由 App 固定为 true */
     panelExpanded?: boolean;
     chapters: Chapter[];
@@ -36,6 +37,18 @@ const props = withDefaults(
     /** 当前打开文件的实时进度（%），滚动时更新 */
     liveReadingProgressPercent?: number;
     highlightTerms?: Array<{ text: string; color: string; colorIndex: number }>;
+    searchQuery?: string;
+    searchResults?: Array<{
+      physicalLine: number;
+      displayLine: number;
+      text: string;
+      ranges: Array<{ start: number; end: number }>;
+    }>;
+    searchInProgress?: boolean;
+    searchMatchCase?: boolean;
+    searchWholeWord?: boolean;
+    searchUseRegex?: boolean;
+    activeSearchResultPhysicalLine?: number | null;
     highlightPreviewBg?: string;
     monacoFontFamily?: string;
     bookmarks: Array<{ line: number; note?: string; content: string }>;
@@ -74,13 +87,22 @@ const props = withDefaults(
     fileMetaRecords: () => [],
     liveReadingProgressPercent: undefined,
     highlightTerms: () => [],
+    searchQuery: "",
+    searchResults: () => [],
+    searchInProgress: false,
+    searchMatchCase: false,
+    searchWholeWord: false,
+    searchUseRegex: false,
+    activeSearchResultPhysicalLine: null,
     highlightPreviewBg: "var(--reader-bg, var(--bg))",
     monacoFontFamily: "",
   },
 );
 
 const emit = defineEmits<{
-  "update:activeTab": [value: "files" | "chapters" | "bookmarks" | "highlights"];
+  "update:activeTab": [
+    value: "files" | "chapters" | "bookmarks" | "highlights" | "search",
+  ];
   "update:showChapterCounts": [value: boolean];
   "update:fileCategory": [value: string];
   "update:fileSort": [value: FileSortMode];
@@ -118,6 +140,18 @@ const emit = defineEmits<{
   findHighlightTerm: [text: string];
   removeHighlightTerm: [text: string];
   clearHighlights: [];
+  "update:searchQuery": [value: string];
+  "update:searchMatchCase": [value: boolean];
+  "update:searchWholeWord": [value: boolean];
+  "update:searchUseRegex": [value: boolean];
+  jumpToSearchResult: [
+    item: {
+      physicalLine: number;
+      displayLine: number;
+      text: string;
+      ranges: Array<{ start: number; end: number }>;
+    },
+  ];
 }>();
 
 const {
@@ -146,6 +180,8 @@ const activePanelTitle = computed(() => {
       return "书签";
     case "highlights":
       return "高亮词";
+    case "search":
+      return "搜索";
     default:
       return "";
   }
@@ -165,7 +201,7 @@ const highlightTabIconMuted = computed(() => {
 });
 
 function onActivityTabClick(
-  tab: "files" | "chapters" | "bookmarks" | "highlights",
+  tab: "files" | "chapters" | "bookmarks" | "highlights" | "search",
 ) {
   if (props.panelExpanded && props.activeTab === tab) {
     emit("requestCollapsePanel");
@@ -262,6 +298,16 @@ defineExpose({
         @click="onActivityTabClick('chapters')"
       >
         <span class="activityIcon" v-html="icons.chapterList"></span>
+      </button>
+      <button
+        type="button"
+        class="activityTabBtn"
+        :class="{ active: panelExpanded && activeTab === 'search' }"
+        title="搜索"
+        aria-label="搜索"
+        @click="onActivityTabClick('search')"
+      >
+        <span class="activityIcon" v-html="icons.find"></span>
       </button>
       <button
         type="button"
@@ -394,6 +440,23 @@ defineExpose({
         @remove-highlight-term="emit('removeHighlightTerm', $event)"
         @clear-highlights="emit('clearHighlights')"
       />
+      <SearchPanel
+        v-show="activeTab === 'search'"
+        :active="activeTab === 'search'"
+        :current-file-path="currentFilePath"
+        :query="searchQuery ?? ''"
+        :results="searchResults ?? []"
+        :loading="searchInProgress ?? false"
+        :match-case="searchMatchCase ?? false"
+        :whole-word="searchWholeWord ?? false"
+        :use-regex="searchUseRegex ?? false"
+        :active-physical-line="activeSearchResultPhysicalLine ?? null"
+        @update:query="emit('update:searchQuery', $event)"
+        @update:match-case="emit('update:searchMatchCase', $event)"
+        @update:whole-word="emit('update:searchWholeWord', $event)"
+        @update:use-regex="emit('update:searchUseRegex', $event)"
+        @jump-to-result="emit('jumpToSearchResult', $event)"
+      />
     </div>
     <Transition name="sidebarDropOverlay">
       <div
@@ -499,7 +562,8 @@ defineExpose({
 .activityTabBtn.color {
   opacity: 0.6;
 }
-.activityTabBtn.color:hover {
+.activityTabBtn.color:hover,
+.activityTabBtn.color.active {
   opacity: 1;
 }
 .activityTabBtn--mutedColor .activityIcon :deep(svg) {

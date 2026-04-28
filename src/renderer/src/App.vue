@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, provide, ref, useTemplateRef, watch } from "vue";
+import { computed, onBeforeUnmount, provide, ref, useTemplateRef, watch } from "vue";
 import type { ComponentPublicInstance } from "vue";
 import { getChapterMatchRules, type Chapter } from "./chapter";
 import AppHeader, { type RecentFileItem } from "./components/AppHeader.vue";
@@ -203,9 +203,28 @@ const totalLineCount = ref(0);
 const chapters = ref<Chapter[]>([]);
 const activeChapterIdx = ref<number>(-1);
 const showChapterCounts = ref(defaultShowChapterCounts);
-const sidebarTab = ref<"files" | "chapters" | "bookmarks" | "highlights">(
+const sidebarTab = ref<
+  "files" | "chapters" | "bookmarks" | "highlights" | "search"
+>(
   "files",
 );
+type SidebarSearchResult = {
+  physicalLine: number;
+  displayLine: number;
+  text: string;
+  ranges: Array<{ start: number; end: number }>;
+};
+const searchQuery = ref("");
+const searchResults = ref<SidebarSearchResult[]>([]);
+const searchInProgress = ref(false);
+const activeSearchResultPhysicalLine = ref<number | null>(null);
+const searchMatchCase = ref(false);
+const searchWholeWord = ref(false);
+const searchUseRegex = ref(false);
+const SEARCH_RESULT_LIMIT = 20000;
+const SEARCH_DEBOUNCE_MS = 180;
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let searchRunToken = 0;
 const txtFiles = ref<TxtFileItem[]>([]);
 const fileCategory = ref<string>(FILE_CATEGORY_FILTER_ALL);
 const fileSort = ref<FileSortMode>(DEFAULT_FILE_SORT);
@@ -1011,8 +1030,217 @@ async function clearCurrentFileHighlightTerms() {
 }
 
 function onFindHighlightTermFromSidebar(text: string) {
-  readerRef.value?.openFindWithSearchString?.(text);
+  if (!currentFile.value || loading.value || totalLineCount.value <= 0) return;
+  ensurePinBeforeRevealFindWidget();
+  readerRef.value?.jumpToNextInlineSearchMatch?.(text, {
+    caseSensitive: false,
+    wholeWord: false,
+    useRegex: false,
+    smooth: true,
+  });
 }
+
+function clearSidebarSearchState() {
+  searchQuery.value = "";
+  searchResults.value = [];
+  searchInProgress.value = false;
+  activeSearchResultPhysicalLine.value = null;
+  searchRunToken += 1;
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = null;
+  }
+  readerRef.value?.clearInlineSearchState?.();
+}
+
+function isWordChar(ch: string): boolean {
+  return /[0-9A-Za-z_]/.test(ch);
+}
+
+function isWholeWordBoundary(text: string, start: number, end: number): boolean {
+  const before = start > 0 ? text[start - 1] : "";
+  const after = end < text.length ? text[end] : "";
+  const leftOk = before === "" || !isWordChar(before);
+  const rightOk = after === "" || !isWordChar(after);
+  return leftOk && rightOk;
+}
+
+function collectPlainRanges(
+  text: string,
+  query: string,
+  caseSensitive: boolean,
+  wholeWord: boolean,
+): Array<{ start: number; end: number }> {
+  const source = caseSensitive ? text : text.toLowerCase();
+  const needle = caseSensitive ? query : query.toLowerCase();
+  const out: Array<{ start: number; end: number }> = [];
+  if (!needle) return out;
+  let from = 0;
+  while (from < source.length) {
+    const idx = source.indexOf(needle, from);
+    if (idx < 0) break;
+    const end = idx + needle.length;
+    if (!wholeWord || isWholeWordBoundary(text, idx, end)) {
+      out.push({ start: idx, end });
+    }
+    from = end;
+  }
+  return out;
+}
+
+function collectRegexRanges(
+  text: string,
+  query: string,
+  caseSensitive: boolean,
+  wholeWord: boolean,
+): Array<{ start: number; end: number }> | null {
+  const flags = caseSensitive ? "g" : "gi";
+  let reg: RegExp;
+  try {
+    reg = new RegExp(query, flags);
+  } catch {
+    return null;
+  }
+  const out: Array<{ start: number; end: number }> = [];
+  let match: RegExpExecArray | null = null;
+  while ((match = reg.exec(text)) != null) {
+    const matched = match[0] ?? "";
+    const start = match.index;
+    const end = start + matched.length;
+    if (matched.length === 0) {
+      reg.lastIndex = start + 1;
+      continue;
+    }
+    if (!wholeWord || isWholeWordBoundary(text, start, end)) {
+      out.push({ start, end });
+    }
+  }
+  return out;
+}
+
+function runSidebarSearch(token: number) {
+  if (token !== searchRunToken) return;
+  const q = searchQuery.value.trim();
+  if (!currentFile.value || !q) {
+    searchResults.value = [];
+    searchInProgress.value = false;
+    return;
+  }
+  const caseSensitive = searchMatchCase.value;
+  const wholeWord = searchWholeWord.value;
+  const useRegex = searchUseRegex.value;
+  const maxLine = stream.getPhysicalLineCount();
+  const next: SidebarSearchResult[] = [];
+  for (let line = 1; line <= maxLine; line += 1) {
+    const text = stream.getPhysicalLineContent(line);
+    const ranges = useRegex
+      ? collectRegexRanges(text, q, caseSensitive, wholeWord)
+      : collectPlainRanges(text, q, caseSensitive, wholeWord);
+    if (ranges == null) {
+      searchResults.value = [];
+      activeSearchResultPhysicalLine.value = null;
+      searchInProgress.value = false;
+      return;
+    }
+    if (ranges.length === 0) continue;
+    next.push({
+      physicalLine: line,
+      displayLine: stream.physicalLineToDisplayForReader(line),
+      text,
+      ranges,
+    });
+    if (next.length >= SEARCH_RESULT_LIMIT) break;
+  }
+  if (token !== searchRunToken) return;
+  searchResults.value = next;
+  readerRef.value?.setInlineSearchState?.(q, null, {
+    caseSensitive: caseSensitive,
+    wholeWord: wholeWord,
+    useRegex: useRegex,
+  });
+  if (
+    activeSearchResultPhysicalLine.value != null &&
+    !next.some((it) => it.physicalLine === activeSearchResultPhysicalLine.value)
+  ) {
+    activeSearchResultPhysicalLine.value = null;
+  }
+  searchInProgress.value = false;
+}
+
+function scheduleSidebarSearch() {
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = null;
+  }
+  const q = searchQuery.value.trim();
+  if (!currentFile.value || !q) {
+    searchResults.value = [];
+    searchInProgress.value = false;
+    activeSearchResultPhysicalLine.value = null;
+    readerRef.value?.clearInlineSearchState?.();
+    return;
+  }
+  const token = ++searchRunToken;
+  searchInProgress.value = true;
+  searchDebounceTimer = setTimeout(() => {
+    searchDebounceTimer = null;
+    runSidebarSearch(token);
+  }, SEARCH_DEBOUNCE_MS);
+}
+
+watch(searchQuery, () => {
+  scheduleSidebarSearch();
+});
+
+watch([searchMatchCase, searchWholeWord, searchUseRegex], () => {
+  scheduleSidebarSearch();
+});
+
+watch(totalLineCount, () => {
+  if (!searchQuery.value.trim()) return;
+  scheduleSidebarSearch();
+});
+
+watch(currentFile, (next, prev) => {
+  if (next === prev) return;
+  clearSidebarSearchState();
+});
+
+function onJumpToSearchResult(item: SidebarSearchResult) {
+  if (!currentFile.value || loading.value || totalLineCount.value <= 0) return;
+  activeSearchResultPhysicalLine.value = item.physicalLine;
+  ensurePinBeforeRevealFindWidget();
+  const displayLine = stream.physicalLineToDisplayForReader(item.physicalLine);
+  const primaryRange = item.ranges[0];
+  const startColumn = primaryRange ? primaryRange.start + 1 : 1;
+  const endColumn = primaryRange
+    ? Math.max(startColumn + 1, primaryRange.end + 1)
+    : startColumn + 1;
+  readerRef.value?.setInlineSearchState?.(searchQuery.value, {
+    lineNumber: displayLine,
+    startColumn,
+    endColumn,
+  }, {
+    caseSensitive: searchMatchCase.value,
+    wholeWord: searchWholeWord.value,
+    useRegex: searchUseRegex.value,
+  });
+  readerRef.value?.jumpToSearchMatchCentered?.(
+    displayLine,
+    startColumn,
+    endColumn,
+  );
+  queueMicrotask(() => readerRef.value?.emitProbeLine?.());
+}
+
+onBeforeUnmount(() => {
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = null;
+  }
+  activeSearchResultPhysicalLine.value = null;
+  readerRef.value?.clearInlineSearchState?.();
+});
 
 function applySettings(payload: SettingsApplyPayload) {
   const prevCompressBlankKeepOneBlank = compressBlankKeepOneBlank.value;
@@ -1286,6 +1514,13 @@ useAppShellThemeWatch({
           :live-reading-progress-percent="liveReadingProgressForUi"
           :bookmarks="bookmarkListItems"
           :highlight-terms="currentFileHighlightTerms"
+          :search-query="searchQuery"
+          :search-results="searchResults"
+          :search-in-progress="searchInProgress"
+          :search-match-case="searchMatchCase"
+          :search-whole-word="searchWholeWord"
+          :search-use-regex="searchUseRegex"
+          :active-search-result-physical-line="activeSearchResultPhysicalLine"
           :highlight-preview-bg="
             currentTheme === 'vs'
               ? readerSurfaceLight.readerBg
@@ -1314,6 +1549,11 @@ useAppShellThemeWatch({
           @edit-bookmark="onEditBookmark"
           @remove-bookmark="onRemoveBookmark"
           @find-highlight-term="onFindHighlightTermFromSidebar"
+          @update:search-query="searchQuery = $event"
+          @update:search-match-case="searchMatchCase = $event"
+          @update:search-whole-word="searchWholeWord = $event"
+          @update:search-use-regex="searchUseRegex = $event"
+          @jump-to-search-result="onJumpToSearchResult"
           @remove-highlight-term="onRemoveHighlightTerm({ text: $event })"
           @clear-highlights="clearCurrentFileHighlightTerms"
           @persist-ui="onPersistUi"

@@ -19,6 +19,7 @@ import {
   buildChapterTitleDecorations,
   setReaderSyntaxHighlightEnabled,
 } from "../monaco/readerInlineDecorations";
+import { useReaderInlineSearch } from "../composables/useReaderInlineSearch";
 import {
   replaceImgAnchorLinesWithViewZones,
   removeViewZonesById,
@@ -86,6 +87,8 @@ const editor = shallowRef<monaco.editor.IStandaloneCodeEditor | null>(null);
 const model = shallowRef<monaco.editor.ITextModel | null>(null);
 /** 章节标题行内装饰（`buildChapterTitleDecorations` / `inlineClassName` 着色）；与 View Zone 留白无关 */
 const chapterTitleDecorationsCollection =
+  shallowRef<monaco.editor.IEditorDecorationsCollection | null>(null);
+const inlineSearchDecorationsCollection =
   shallowRef<monaco.editor.IEditorDecorationsCollection | null>(null);
 const hlTipVisible = ref(false);
 const hlPickerVisible = ref(false);
@@ -497,6 +500,8 @@ watch(
 
 /** 程序性滚动（跳转、复位等）期间，onDidScrollChange 仍触发，但不视为用户阅读滚动 */
 let programmaticScrollDepth = 0;
+/** 程序化改选区后的短时间抑制：避免搜索跳转触发笔尖提示。 */
+let suppressHighlightTipUntilMs = 0;
 
 function beginProgrammaticScroll() {
   programmaticScrollDepth++;
@@ -764,6 +769,7 @@ function clear(opts?: ReaderClearOptions) {
   const e = editor.value;
   const prevModel = model.value;
   chapterTitleDecorationsCollection.value?.clear();
+  inlineSearch.clearInlineSearchState();
 
   e?.updateOptions({ stickyScroll: { enabled: false } });
 
@@ -773,6 +779,7 @@ function clear(opts?: ReaderClearOptions) {
     prevModel.dispose();
     model.value = next;
     chapterTitleDecorationsCollection.value = e.createDecorationsCollection();
+    inlineSearchDecorationsCollection.value = e.createDecorationsCollection();
     e.setPosition({ lineNumber: 1, column: 1 });
     e.setScrollTop(0);
     e.layout();
@@ -952,6 +959,38 @@ function jumpToLine(lineNumber: number, smooth = true) {
   e.setPosition({ lineNumber: line, column: 1 });
   e.focus();
 }
+
+/** 搜索结果跳转：将目标行尽量居中显示 */
+function jumpToLineCentered(lineNumber: number, smooth = true) {
+  const e = editor.value;
+  const m = model.value;
+  if (!e || !m) return;
+  beginProgrammaticScroll();
+  const lineCount = m.getLineCount();
+  const line = Math.max(
+    1,
+    Math.min(Math.floor(lineNumber), Math.max(1, lineCount)),
+  );
+  const scrollType = monacoScrollType(smooth);
+  e.layout();
+  e.revealLineInCenter(line, scrollType);
+  e.setPosition({ lineNumber: line, column: 1 });
+  e.focus();
+}
+
+function suppressHighlightTipForProgrammaticSelection() {
+  suppressHighlightTipUntilMs = Date.now() + 300;
+  closeHighlightFloatUi();
+}
+
+const inlineSearch = useReaderInlineSearch({
+  editor,
+  model,
+  inlineSearchDecorationsCollection,
+  beginProgrammaticScroll,
+  monacoScrollType,
+  suppressHighlightTipForProgrammaticSelection,
+});
 
 /**
  * 书签列表跳转：将目标行顶对齐视口顶后再向上偏移「一行高」像素，为黏性章节条留白；
@@ -1374,7 +1413,12 @@ defineExpose({
   resetToTop,
   scrollToDocumentStart,
   jumpToLine,
+  jumpToLineCentered,
+  jumpToSearchMatchCentered: inlineSearch.jumpToSearchMatchCentered,
+  jumpToNextInlineSearchMatch: inlineSearch.jumpToNextInlineSearchMatch,
   jumpToBookmarkLine,
+  setInlineSearchState: inlineSearch.setInlineSearchState,
+  clearInlineSearchState: inlineSearch.clearInlineSearchState,
   emitProbeLine,
   getProbeLine,
   getViewportEndLine,
@@ -1487,6 +1531,8 @@ onMounted(() => {
   });
   chapterTitleDecorationsCollection.value =
     editor.value.createDecorationsCollection();
+  inlineSearchDecorationsCollection.value =
+    editor.value.createDecorationsCollection();
 
   const e = editor.value;
   if (e) {
@@ -1503,7 +1549,14 @@ onMounted(() => {
     });
     const d2 = e.onDidChangeCursorPosition(() => emitProbeLine(false));
     const dSel = e.onDidChangeCursorSelection(() => {
+      if (Date.now() < suppressHighlightTipUntilMs) {
+        closeHighlightFloatUi();
+        return;
+      }
       void nextTick(() => updateHighlightTipFromSelection());
+      if (inlineSearch.hasInlineSearchQuery()) {
+        inlineSearch.applyInlineSearchDecorations();
+      }
     });
     const d3 = installReaderScrollKeyHandler(monaco, e, {
       onSpacePageDown: () => scrollByPageStep(1),
