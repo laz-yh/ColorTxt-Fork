@@ -45,7 +45,7 @@ type SidebarBookmarkItem = {
 };
 
 export type ReaderSidebarListProps = Readonly<{
-  activeTab: "files" | "chapters" | "bookmarks";
+  activeTab: "files" | "chapters" | "bookmarks" | "highlights";
   chapters: Chapter[];
   /** 原始文件列表（与 `App` 中 `txtFiles` 同源）；项上可带 `category`；进度等与 `metaProgressByPathKey` / `fileMetaRecords` 合并 */
   files: TxtFileItem[];
@@ -390,7 +390,11 @@ export function useReaderSidebarLists(
         requestAnimationFrame(
           () =>
             void ensureActiveChapterVisible(
-              { smooth: wantSmoothScroll, allowWhenHidden },
+              {
+                smooth: wantSmoothScroll,
+                allowWhenHidden,
+                align,
+              },
               layoutRetry + 1,
             ),
         );
@@ -405,7 +409,12 @@ export function useReaderSidebarLists(
     });
   }
 
-  async function ensureCurrentFileVisible(mode: "edge" | "center" = "edge") {
+  const MAX_FILE_LIST_LAYOUT_RETRIES = 48;
+
+  async function ensureCurrentFileVisible(
+    mode: "edge" | "center" = "edge",
+    layoutRetry = 0,
+  ): Promise<void> {
     await nextTick();
     const path = props.currentFilePath;
     if (!path) return;
@@ -414,7 +423,22 @@ export function useReaderSidebarLists(
     if (idx < 0) return;
 
     const vl = fileListRef.value;
-    if (!vl) return;
+    const scrollHost = vl?.scrollEl as HTMLElement | undefined;
+    const clientH = scrollHost?.clientHeight ?? 0;
+    if (
+      !vl ||
+      !scrollHost ||
+      clientH <= 0 ||
+      props.activeTab !== "files"
+    ) {
+      if (layoutRetry < MAX_FILE_LIST_LAYOUT_RETRIES) {
+        requestAnimationFrame(() =>
+          void ensureCurrentFileVisible(mode, layoutRetry + 1),
+        );
+      }
+      return;
+    }
+
     if (mode === "center") {
       vl.scrollToIndex(idx, { align: "center", behavior: "auto" });
       return;
@@ -479,8 +503,26 @@ export function useReaderSidebarLists(
     },
   );
 
-  // 不在 `activeTab` 切换时触发章节列表滚动：
-  // 避免用户手动从「文件列表」切到「章节列表」时被打断/移动滚动条。
+  // 切换到「章节 / 文件」时：列表可能刚从隐藏变为可见（clientHeight 由 0 变为正常），
+  // 此前 `shouldCenter*` 一拍或打开文件时的 pulse 可能未生效；此处补一次居中。
+  watch(
+    () => props.activeTab,
+    (tab) => {
+      void nextTick(() => {
+        requestAnimationFrame(() => {
+          if (tab === "chapters") {
+            void ensureActiveChapterVisible({
+              smooth: false,
+              allowWhenHidden: false,
+              align: "center",
+            });
+          } else if (tab === "files" && props.currentFilePath) {
+            void ensureCurrentFileVisible("center");
+          }
+        });
+      });
+    },
+  );
 
   watch(
     () => props.shouldCenterFileList,

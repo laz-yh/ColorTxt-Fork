@@ -36,6 +36,8 @@ export const readerTxtLoadingHintText = "加载中…";
 
 export const SIDEBAR_MIN_WIDTH = 250;
 export const SIDEBAR_MIN_READER_WIDTH = 300;
+/** 侧栏左侧活动栏（图标列）固定宽度，与 `sidebarWidth` 持久化中的「总宽」相加关系为：总宽 = 本列 + 面板列 */
+export const SIDEBAR_ACTIVITY_BAR_WIDTH = 48;
 
 export const FULLSCREEN_LEFT_EDGE_PX = 20;
 export const FULLSCREEN_TOP_EDGE_PX = 20;

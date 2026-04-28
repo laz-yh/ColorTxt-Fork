@@ -276,11 +276,12 @@ onBeforeUnmount(() => {
 .dirScanLine {
   margin: 0;
   max-width: min(92vw, 720px);
-  font-size: 14px;
-  color: #ffffff;
+  padding: 6px 10px;
+  border-radius: 4px;
+  background-color: var(--bg);
+  color: var(--fg);
+  font-size: 12px;
   text-align: center;
-  word-break: break-all;
-  font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
 }
 
 .dirScanOverlay-enter-active,

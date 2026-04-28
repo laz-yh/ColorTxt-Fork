@@ -112,6 +112,17 @@ function scrollToTop() {
   virtualScrollTop.value = 0;
 }
 
+/** 滚动容器在 padding 内的可视内容高度，以及真实 maxScrollTop（与侧栏 `.virtualList-scroll` 的 padding 对齐） */
+function getScrollHostContentViewport(el: HTMLElement) {
+  const cs = getComputedStyle(el);
+  const padTop = Number.parseFloat(cs.paddingTop) || 0;
+  const padBottom = Number.parseFloat(cs.paddingBottom) || 0;
+  const raw = el.clientHeight - padTop - padBottom;
+  const contentH = Number.isFinite(raw) ? Math.max(1, raw) : 1;
+  const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+  return { contentH, maxScroll };
+}
+
 /**
  * 将指定下标滚入视口。
  * - center：垂直居中
@@ -136,27 +147,25 @@ function scrollToIndex(
   const behavior = options?.behavior ?? "auto";
 
   let nextScrollTop = el.scrollTop;
+  const { contentH, maxScroll } = getScrollHostContentViewport(el);
 
   if (align === "center") {
-    let viewH = el.clientHeight;
-    if (viewH <= 0) {
+    let viewH = contentH;
+    if (el.clientHeight <= 0) {
       viewH = Math.max(1, listViewportHeight.value);
     }
-    const maxScroll = Math.max(0, n * stride - viewH);
-    nextScrollTop = itemTop - viewH / 2 + stride / 2;
+    // 行块几何中心对齐到 padding 内可视区中心（避免把 padding 算进视高导致「居中」偏上/偏下）
+    nextScrollTop = itemTop + stride / 2 - viewH / 2;
     nextScrollTop = Math.max(0, Math.min(nextScrollTop, maxScroll));
   } else {
     const viewTop = el.scrollTop + padding;
-    const viewBottom = el.scrollTop + el.clientHeight - padding;
+    const viewBottom = el.scrollTop + contentH - padding;
     if (itemTop < viewTop) {
       nextScrollTop = itemTop - padding;
     } else if (itemBottom > viewBottom) {
-      nextScrollTop = itemBottom - (el.clientHeight - padding);
+      nextScrollTop = itemBottom - (contentH - padding);
     }
-    nextScrollTop = Math.max(
-      0,
-      Math.min(nextScrollTop, Math.max(0, n * stride - el.clientHeight)),
-    );
+    nextScrollTop = Math.max(0, Math.min(nextScrollTop, maxScroll));
   }
 
   if (Math.abs(nextScrollTop - el.scrollTop) < 0.5) {

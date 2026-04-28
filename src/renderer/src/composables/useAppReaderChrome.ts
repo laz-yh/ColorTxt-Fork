@@ -51,8 +51,8 @@ export function useAppReaderChrome(deps: {
   readerRef: ReaderRef;
   /** 全屏侧栏文件列表：Teleport 弹层是否打开；为真时 `mouseleave` 不收起侧栏，关闭后再按指针位置判断 */
   fullscreenFileListPopoversOpen: Ref<boolean>;
-  /** 全屏顶栏：高亮词下拉是否打开；为真时不收起顶栏，且查找栏打开时也不强制收起顶栏 */
-  fullscreenHeaderHighlightMenuOpen: Ref<boolean>;
+  /** 全屏下临时禁用侧栏左缘感应唤起（如设置/配色弹框打开期间） */
+  suppressFullscreenSidebarHover?: Ref<boolean>;
 }) {
   const isFullscreenView = ref(false);
   const showFullscreenTip = ref(false);
@@ -263,6 +263,7 @@ export function useAppReaderChrome(deps: {
 
   function updateFullscreenSidebarHover(ev: MouseEvent) {
     if (!isFullscreenView.value) return;
+    if (deps.suppressFullscreenSidebarHover?.value) return;
     if (showFullscreenSidebar.value) return;
     const x = ev.clientX;
     if (x <= FULLSCREEN_LEFT_EDGE_PX && canShowFullscreenPanel("sidebar")) {
@@ -328,7 +329,6 @@ export function useAppReaderChrome(deps: {
     clientY: number,
   ) {
     if (!isFullscreenView.value || !showFullscreenHeader.value) return;
-    if (deps.fullscreenHeaderHighlightMenuOpen.value) return;
     const top = document.elementFromPoint(clientX, clientY);
     if (top && nodeIsUnderFullscreenHeaderFloat(top)) return;
     const header = fullscreenHeaderOverlayRef.value;
@@ -340,9 +340,7 @@ export function useAppReaderChrome(deps: {
   function updateFullscreenHeaderHover(ev: MouseEvent) {
     if (!isFullscreenView.value) return;
     if (deps.readerRef.value?.isFindWidgetRevealed?.()) {
-      if (!deps.fullscreenHeaderHighlightMenuOpen.value) {
-        collapseFullscreenHeaderAndCloseFindIfRevealed();
-      }
+      collapseFullscreenHeaderAndCloseFindIfRevealed();
       return;
     }
     if (showFullscreenHeader.value) return;
@@ -359,31 +357,14 @@ export function useAppReaderChrome(deps: {
 
   function onFullscreenHeaderMouseLeave(ev: MouseEvent) {
     if (!isFullscreenView.value) return;
-    if (deps.fullscreenHeaderHighlightMenuOpen.value) return;
     const rt = ev.relatedTarget;
     if (rt instanceof Node && nodeIsUnderFullscreenHeaderFloat(rt)) return;
     const { clientX, clientY } = ev;
     requestAnimationFrame(() => {
       if (!isFullscreenView.value || !showFullscreenHeader.value) return;
-      if (deps.fullscreenHeaderHighlightMenuOpen.value) return;
       tryCollapseFullscreenHeaderFromPointer(clientX, clientY);
     });
   }
-
-  watch(
-    () => deps.fullscreenHeaderHighlightMenuOpen.value,
-    (open, wasOpen) => {
-      if (wasOpen !== true || open !== false) return;
-      if (!isFullscreenView.value || !showFullscreenHeader.value) return;
-      requestAnimationFrame(() => {
-        if (deps.fullscreenHeaderHighlightMenuOpen.value) return;
-        tryCollapseFullscreenHeaderFromPointer(
-          lastFullscreenPointerClientX.value,
-          lastFullscreenPointerClientY.value,
-        );
-      });
-    },
-  );
 
   /** 全屏底缘感应：仅负责唤起。收起由底栏容器 @mouseleave 处理。 */
   function updateFullscreenFooterHover(ev: MouseEvent) {

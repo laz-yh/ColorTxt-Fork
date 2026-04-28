@@ -15,9 +15,10 @@ import type { ShortcutBindingMap } from "../services/shortcutRegistry";
 type FileSession = ReturnType<typeof useAppFileSession>;
 type Stream = ReturnType<typeof useTxtStreamPipeline>;
 
-function isOverFileListDropZone(ev: DragEvent): boolean {
+/** 侧栏任意区域拖入均合并进文件列表，不显示阅读区「打开文件」蒙层 */
+function isOverSidebarImportDropZone(ev: DragEvent): boolean {
   for (const n of ev.composedPath()) {
-    if (n instanceof HTMLElement && n.dataset.dropZone === "file-list") {
+    if (n instanceof HTMLElement && n.dataset.dropZone === "reader-sidebar") {
       return true;
     }
   }
@@ -65,7 +66,7 @@ export function useAppWindowBindings(deps: {
   compressBlankLines: Ref<boolean>;
   suppressFileListCenterAfterLoad: Ref<boolean>;
   txtFiles: Ref<Array<{ name: string; path: string; size: number }>>;
-  sidebarTab: Ref<"files" | "chapters" | "bookmarks">;
+  sidebarTab: Ref<"files" | "chapters" | "bookmarks" | "highlights">;
   currentFile: Ref<string | null>;
   dirListScanning: Ref<boolean>;
   dirListCurrentName: Ref<string>;
@@ -434,11 +435,11 @@ export function useAppWindowBindings(deps: {
         clearReaderDropOverlay();
         return;
       }
-      if (isOverFileListDropZone(ev)) {
+      if (isOverSidebarImportDropZone(ev)) {
         clearReaderDropOverlay();
         return;
       }
-      /** 文件列表以外（含顶栏、底栏、侧栏其它 tab 等）一律在阅读区容器上提示「打开文件」 */
+      /** 侧栏以外（含顶栏、底栏、阅读区等）在阅读区容器上提示「打开文件」 */
       deps.readerDropOverlayVisible.value = true;
     }
 

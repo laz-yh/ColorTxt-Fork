@@ -28,6 +28,7 @@ import {
   assignHighlightTermToColorForFile,
   findFileMetaRecord,
   removeHighlightTermFromFile,
+  upsertFileMetaRecord,
   type FileMetaRecord,
 } from "./stores/fileMetaStore";
 import {
@@ -65,6 +66,7 @@ import {
   minFullscreenReaderWidthPercent,
   minFontSize,
   minLineHeightMultiple,
+  SIDEBAR_ACTIVITY_BAR_WIDTH,
   type ReaderSurfacePalette,
 } from "./constants/appUi";
 import {
@@ -98,12 +100,12 @@ import {
 const readerRef = ref<InstanceType<typeof ReaderMain> | null>(null);
 /** 全屏侧栏文件列表是否有 Teleport 弹层打开（分类/筛选下拉、右键菜单等） */
 const fullscreenFileListPopoversOpen = ref(false);
-/** 全屏顶栏：高亮词下拉是否打开 */
-const fullscreenHeaderHighlightMenuOpen = ref(false);
+/** 全屏下打开设置/配色弹框期间，禁用左缘感应自动唤起侧栏 */
+const suppressFullscreenSidebarHover = ref(false);
 const chrome = useAppReaderChrome({
   readerRef,
   fullscreenFileListPopoversOpen,
-  fullscreenHeaderHighlightMenuOpen,
+  suppressFullscreenSidebarHover,
 });
 const {
   isFullscreenView,
@@ -168,6 +170,13 @@ const showAboutPanel = ref(false);
 const showShortcutPanel = ref(false);
 const showSettingsPanel = ref(false);
 const showColorSchemePanel = ref(false);
+watch(
+  () => [showSettingsPanel.value, showColorSchemePanel.value] as const,
+  ([settingsOpen, colorOpen]) => {
+    suppressFullscreenSidebarHover.value = settingsOpen || colorOpen;
+  },
+  { immediate: true },
+);
 const appOverlaysRef = ref<InstanceType<typeof AppOverlays> | null>(null);
 const showChapterRulePanel = ref(false);
 const chapterRuleErrorText = ref("");
@@ -189,7 +198,9 @@ const totalLineCount = ref(0);
 const chapters = ref<Chapter[]>([]);
 const activeChapterIdx = ref<number>(-1);
 const showChapterCounts = ref(defaultShowChapterCounts);
-const sidebarTab = ref<"files" | "chapters" | "bookmarks">("files");
+const sidebarTab = ref<"files" | "chapters" | "bookmarks" | "highlights">(
+  "files",
+);
 const txtFiles = ref<TxtFileItem[]>([]);
 const fileCategory = ref<string>(FILE_CATEGORY_FILTER_ALL);
 const fileSort = ref<FileSortMode>(DEFAULT_FILE_SORT);
@@ -225,12 +236,16 @@ const showReaderEmptyHint = computed(
     totalCharCount.value === 0 &&
     totalLineCount.value === 0,
 );
-/** 非全屏：受 showSidebar；全屏：左缘悬停显示 */
-const sidebarVisible = computed(
-  () =>
-    (!isFullscreenView.value && showSidebar.value) ||
-    (isFullscreenView.value && showFullscreenSidebar.value),
+/** 非全屏：侧栏壳（含活动栏）始终占位；全屏：仅浮动展开时显示整块 */
+const sidebarShellVisible = computed(
+  () => !isFullscreenView.value || showFullscreenSidebar.value,
 );
+/** 非全屏且收起面板时仅活动栏宽度；其余与 `sidebarWidthForLayout` 一致 */
+const sidebarPaneLayoutWidth = computed(() => {
+  if (isFullscreenView.value) return sidebarWidthForLayout.value;
+  if (!showSidebar.value) return SIDEBAR_ACTIVITY_BAR_WIDTH;
+  return sidebarWidthForLayout.value;
+});
 const currentTheme = ref(defaultReaderTheme);
 /** Monaco txtr.* 语法着色（标点/数字/英文/引号与括号内等） */
 const monacoCustomHighlight = ref(defaultMonacoCustomHighlight);
@@ -856,16 +871,21 @@ function onRemoveHighlightTerm(payload: { text: string }) {
   persistFileMeta();
 }
 
-function onRemoveHighlightTermFromHeader(text: string) {
-  onRemoveHighlightTerm({ text });
+async function clearCurrentFileHighlightTerms() {
+  const path = currentFile.value;
+  if (!path) return;
+  const confirmed = await window.colorTxt.confirmClearHighlightTerms();
+  if (!confirmed) return;
+  fileMetaRecords.value = upsertFileMetaRecord(
+    fileMetaRecords.value,
+    path,
+    () => ({ highlightWordsByIndex: undefined }),
+  );
+  persistFileMeta();
 }
 
-function onFindHighlightTermFromHeader(text: string) {
+function onFindHighlightTermFromSidebar(text: string) {
   readerRef.value?.openFindWithSearchString?.(text);
-}
-
-function onHeaderHighlightMenuOpen(open: boolean) {
-  fullscreenHeaderHighlightMenuOpen.value = open;
 }
 
 function applySettings(payload: SettingsApplyPayload) {
@@ -1044,12 +1064,6 @@ useAppShellThemeWatch({
         :can-pin="canPin"
         :bookmark-active="bookmarkActive"
         :can-bookmark="canBookmark"
-        :highlight-terms="currentFileHighlightTerms"
-        :highlight-preview-bg="
-          currentTheme === 'vs'
-            ? readerSurfaceLight.readerBg
-            : readerSurfaceDark.readerBg
-        "
         :current-theme="currentTheme"
         :show-sidebar="showSidebar"
         :can-increase-font="readerFontSize < maxFontSize"
@@ -1070,9 +1084,6 @@ useAppShellThemeWatch({
         @open-file="openFileViaDialog"
         @pin-click="onPinClick"
         @bookmark-click="onBookmarkClick"
-        @remove-highlight-term="onRemoveHighlightTermFromHeader"
-        @find-highlight-term="onFindHighlightTermFromHeader"
-        @update:highlight-menu-open="onHeaderHighlightMenuOpen"
         @go-back-from-pin="onGoBackFromPin"
         @change-theme="currentTheme = $event"
         @toggle-sidebar="showSidebar = !showSidebar"
@@ -1113,13 +1124,15 @@ useAppShellThemeWatch({
         ref="fullscreenSidebarOverlayRef"
         class="sidebarPaneWrap"
         :class="{ 'sidebarPaneWrap--fullscreen': isFullscreenView }"
-        v-show="sidebarVisible"
-        :style="{ width: `${sidebarWidthForLayout}px` }"
+        v-show="sidebarShellVisible"
+        :style="{ width: `${sidebarPaneLayoutWidth}px` }"
         @mouseleave="onFullscreenSidebarMouseLeave"
       >
         <ReaderSidebar
           ref="readerSidebarRef"
           active-scroll-mode="center"
+          :panel-expanded="isFullscreenView || showSidebar"
+          :activity-icons-on-dark="currentTheme === 'vs-dark'"
           :in-fullscreen="isFullscreenView"
           :show-fullscreen-sidebar="
             isFullscreenView ? showFullscreenSidebar : undefined
@@ -1138,6 +1151,13 @@ useAppShellThemeWatch({
           :meta-progress-by-path-key="metaProgressByPathKey"
           :live-reading-progress-percent="liveReadingProgressForUi"
           :bookmarks="bookmarkListItems"
+          :highlight-terms="currentFileHighlightTerms"
+          :highlight-preview-bg="
+            currentTheme === 'vs'
+              ? readerSurfaceLight.readerBg
+              : readerSurfaceDark.readerBg
+          "
+          :monaco-font-family="monacoFontFamily"
           :active-bookmark-line="activeBookmarkLine"
           :current-file-path="currentFile"
           :chapters="chapters"
@@ -1156,6 +1176,9 @@ useAppShellThemeWatch({
           @remove-bookmarks="removeCurrentFileBookmarks"
           @edit-bookmark="onEditBookmark"
           @remove-bookmark="onRemoveBookmark"
+          @find-highlight-term="onFindHighlightTermFromSidebar"
+          @remove-highlight-term="onRemoveHighlightTerm({ text: $event })"
+          @clear-highlights="clearCurrentFileHighlightTerms"
           @persist-ui="onPersistUi"
           @update:file-category="fileCategory = $event"
           @update:file-sort="fileSort = $event"
@@ -1165,6 +1188,10 @@ useAppShellThemeWatch({
             fullscreenFileListPopoversOpen = $event
           "
           @update:file-list-editing="fileListEditing = $event"
+          @request-expand-panel="showSidebar = true"
+          @request-collapse-panel="showSidebar = false"
+          @open-color-scheme="showColorSchemePanel = true"
+          @open-settings="showSettingsPanel = true"
         />
         <!-- 放在侧栏容器内，避免移到拖条时触发 @mouseleave 导致全屏侧栏收起 -->
         <div

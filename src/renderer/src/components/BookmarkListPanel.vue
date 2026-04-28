@@ -165,8 +165,8 @@ function onContextMenuSelect(actionId: string) {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  /* 右侧由 .sidebar .virtualList-scroll.sidebarList 的 padding 控制列表与右缘间距 */
-  padding: 6px 0 6px 6px;
+  /* 列表与边缘留白由 .sidebar .virtualList-scroll.sidebarList 的 padding 统一控制 */
+  padding: 0;
   background: var(--bg);
 }
 .sidebarList {
@@ -175,7 +175,7 @@ function onContextMenuSelect(actionId: string) {
   min-width: 0;
 }
 .sidebarList--itemGap :deep(.virtualList-row) {
-  padding-bottom: 2px;
+  padding-bottom: 5px;
 }
 .bookmarkItem {
   width: 100%;

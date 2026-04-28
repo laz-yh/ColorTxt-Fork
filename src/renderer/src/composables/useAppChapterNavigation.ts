@@ -40,7 +40,7 @@ export function useAppChapterNavigation(deps: {
   chapterRuleState: Ref<{ rules: ChapterMatchRule[] }>;
   chapterRuleErrorText: Ref<string>;
   showChapterRulePanel: Ref<boolean>;
-  sidebarTab: Ref<"files" | "chapters" | "bookmarks">;
+  sidebarTab: Ref<"files" | "chapters" | "bookmarks" | "highlights">;
   persistSettings: () => void;
   openFilePath: (
     filePath: string,

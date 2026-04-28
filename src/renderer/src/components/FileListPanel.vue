@@ -39,11 +39,6 @@ import {
 } from "../utils/fileListPanelDisplay";
 import { icons } from "../icons";
 import { fileListEmptyHint, fileListDropHint, fileListNoMatchHint } from "../constants/appUi";
-import {
-  collectFsPathsFromDataTransfer,
-  dataTransferLikelyHasExternalFiles,
-} from "../utils/dragDropFsPaths";
-
 const props = withDefaults(
   defineProps<{
     files: SidebarFileItem[];
@@ -396,54 +391,10 @@ onBeforeUnmount(() => {
   window.removeEventListener("resize", onWindowResizeForEditCtxMenu);
 });
 
-const fileListDragOverlayVisible = ref(false);
-
-function onFileListDragEnter(ev: DragEvent) {
-  const dt = ev.dataTransfer;
-  if (!dataTransferLikelyHasExternalFiles(dt)) return;
-  ev.preventDefault();
-  fileListDragOverlayVisible.value = true;
-}
-
-function onFileListDragOver(ev: DragEvent) {
-  const dt = ev.dataTransfer;
-  if (!dataTransferLikelyHasExternalFiles(dt)) return;
-  ev.preventDefault();
-  fileListDragOverlayVisible.value = true;
-  try {
-    if (dt) dt.dropEffect = "copy";
-  } catch {
-    /* ignore */
-  }
-}
-
-function onFileListDragLeave(ev: DragEvent) {
-  const root = ev.currentTarget;
-  if (!(root instanceof HTMLElement)) return;
-  const related = ev.relatedTarget;
-  if (related instanceof Node && root.contains(related)) return;
-  fileListDragOverlayVisible.value = false;
-}
-
-function onFileListDrop(ev: DragEvent) {
-  ev.preventDefault();
-  ev.stopPropagation();
-  fileListDragOverlayVisible.value = false;
-  const paths = collectFsPathsFromDataTransfer(ev.dataTransfer);
-  if (paths.length === 0) return;
-  emit("importDroppedPaths", paths);
-}
 </script>
 
 <template>
-  <div
-    class="sidebarListWrap"
-    data-drop-zone="file-list"
-    @dragenter="onFileListDragEnter"
-    @dragover="onFileListDragOver"
-    @dragleave="onFileListDragLeave"
-    @drop="onFileListDrop"
-  >
+  <div class="sidebarListWrap">
     <div
       ref="listFocusEl"
       class="sidebarTabBody"
@@ -641,10 +592,10 @@ function onFileListDrop(ev: DragEvent) {
         </button>
         <button
           type="button"
-          class="link success sidebarTabFooterAction"
+          class="link sidebarTabFooterAction"
           @click="menus.exitEditFileListMode"
         >
-          保存
+          退出编辑
         </button>
       </template>
     </div>
@@ -791,15 +742,6 @@ function onFileListDrop(ev: DragEvent) {
       :catalog="fileCategoryCatalog"
       @apply="emit('applyCategoryCatalog', $event)"
     />
-    <Transition name="fileListDropOverlay">
-      <div
-        v-if="fileListDragOverlayVisible"
-        class="fileListDropOverlay"
-        aria-hidden="true"
-      >
-        <p class="fileListDropOverlayText">添加文件</p>
-      </div>
-    </Transition>
   </div>
 </template>
 
@@ -812,37 +754,6 @@ function onFileListDrop(ev: DragEvent) {
   flex-direction: column;
 }
 
-.fileListDropOverlay {
-  position: absolute;
-  inset: 0;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgba(0, 0, 0, 0.45);
-  pointer-events: none;
-}
-
-.fileListDropOverlayText {
-  margin: 0;
-  max-width: 100%;
-  font-size: 14px;
-  color: #ffffff;
-  text-align: center;
-  word-break: break-all;
-  font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
-}
-
-.fileListDropOverlay-enter-active,
-.fileListDropOverlay-leave-active {
-  transition: opacity 0.15s ease;
-}
-
-.fileListDropOverlay-enter-from,
-.fileListDropOverlay-leave-to {
-  opacity: 0;
-}
 .sidebarTabBody {
   flex: 1;
   min-height: 0;
@@ -897,7 +808,8 @@ function onFileListDrop(ev: DragEvent) {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  padding: 6px 0 6px 6px;
+  /* 列表与边缘留白由 .sidebar .virtualList-scroll.sidebarList 的 padding 统一控制 */
+  padding: 0;
   background: var(--bg);
 }
 .sidebarList {
@@ -906,7 +818,7 @@ function onFileListDrop(ev: DragEvent) {
   min-width: 0;
 }
 .sidebarList--itemGap :deep(.virtualList-row) {
-  padding-bottom: 1px;
+  padding-bottom: 5px;
 }
 .sidebarItem {
   text-align: left;
@@ -972,7 +884,7 @@ function onFileListDrop(ev: DragEvent) {
   width: 3px;
   align-self: stretch;
   border-radius: 2px;
-  margin: 4px 0;
+  margin: 4px 0 2px 0;
 }
 .fileItemMain {
   flex: 1;

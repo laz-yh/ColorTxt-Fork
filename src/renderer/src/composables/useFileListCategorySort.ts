@@ -106,15 +106,16 @@ export function useFileListCategorySort(
   });
 
   const categoryTriggerSuffix = computed(() => {
-    const m = categoryMenuCounts.value;
-    const v = props.fileCategory;
-    const n =
-      v === FILE_CATEGORY_FILTER_ALL
-        ? m.all
-        : v === FILE_CATEGORY_FILTER_UNCATEGORIZED
-          ? m.uncategorized
-          : (m.byName[v] ?? 0);
-    return `(${n})`;
+    // const m = categoryMenuCounts.value;
+    // const v = props.fileCategory;
+    // const n =
+    //   v === FILE_CATEGORY_FILTER_ALL
+    //     ? m.all
+    //     : v === FILE_CATEGORY_FILTER_UNCATEGORIZED
+    //       ? m.uncategorized
+    //       : (m.byName[v] ?? 0);
+    // return `(${n})`;
+    return "";
   });
 
   const categoryTriggerMarkColor = computed(() => {

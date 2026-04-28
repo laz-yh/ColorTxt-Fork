@@ -161,9 +161,13 @@ body,
   background: var(--scrollbar-thumb-hover);
 }
 
-/* 侧栏列表：列表区与右缘固定间距（有无滚动条一致）；滚动条仍在侧栏最右侧 */
+/* 侧栏虚拟列表：
+ * 顶部保留 6px；底部设为 1px，用于抵消每行 `padding-bottom: 5px` 在最后一项产生的额外空白，
+ * 使最终可见上下留白都为 6px（与 HighlightListPanel 对齐）。
+ */
 .sidebar .virtualList-scroll.sidebarList {
-  padding-right: 6px;
+  box-sizing: border-box;
+  padding: 6px 6px 1px;
 }
 
 /* 侧栏列表滚动条贴右缘：滑块去掉右侧内凹描边（全局 thumb 有 2px 边框） */

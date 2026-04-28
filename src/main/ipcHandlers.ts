@@ -454,7 +454,26 @@ export function registerMainIpcHandlers(
       defaultId: 1,
       cancelId: 0,
       message: "是否要清空当前文件的所有书签？",
-      detail: "此操作将清除当前文件的全部书签记录。",
+      detail: "此操作不可逆！",
+      noLink: true,
+    };
+    const result = win
+      ? await dialog.showMessageBox(win, options)
+      : await dialog.showMessageBox(options);
+    return result.response === 1;
+  });
+
+  ipcMain.removeHandler("dialog:confirmClearHighlightTerms");
+  ipcMain.handle("dialog:confirmClearHighlightTerms", async (evt) => {
+    const win = BrowserWindow.fromWebContents(evt.sender);
+    const options: MessageBoxOptions = {
+      type: "warning",
+      title: APP_DISPLAY_NAME,
+      buttons: ["取消", "清空"],
+      defaultId: 1,
+      cancelId: 0,
+      message: "是否要清空当前文件的所有高亮词？",
+      detail: "此操作不可逆！",
       noLink: true,
     };
     const result = win

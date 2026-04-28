@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import folderOpenSvgRaw from "../assets/folder-open.svg?raw";
+import { icons } from "../icons";
 
 const path = defineModel<string>({ default: "" });
 
@@ -27,10 +27,6 @@ const inputAria = computed(() => {
   if (props.placeholder?.trim()) return props.placeholder.trim();
   return props.isDirectory ? "目录路径" : "文件路径";
 });
-
-const folderIconHtml = computed(() =>
-  folderOpenSvgRaw.replace(/fill="[^"]*"/g, 'fill="currentColor"'),
-);
 
 /** 拖入文件/目录时高亮输入框（非 Files 类型不亮） */
 const isDragOver = ref(false);
@@ -133,7 +129,7 @@ async function onBrowse() {
       :title="isDirectory ? '选择目录' : '选择文件'"
       @click="onBrowse"
     >
-      <span class="pathPicker__icon" aria-hidden="true" v-html="folderIconHtml" />
+      <span class="pathPicker__icon" aria-hidden="true" v-html="icons.folderOpen" />
     </button>
   </div>
 </template>
@@ -195,5 +191,9 @@ async function onBrowse() {
   width: 20px;
   height: 20px;
   display: block;
+}
+
+.pathPicker__icon :deep(path) {
+  fill: currentColor;
 }
 </style>

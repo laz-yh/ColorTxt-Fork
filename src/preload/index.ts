@@ -90,6 +90,10 @@ const api = {
     ) as Promise<boolean>,
   confirmClearBookmarks: () =>
     ipcRenderer.invoke("dialog:confirmClearBookmarks") as Promise<boolean>,
+  confirmClearHighlightTerms: () =>
+    ipcRenderer.invoke(
+      "dialog:confirmClearHighlightTerms",
+    ) as Promise<boolean>,
   confirmClearAppCache: () =>
     ipcRenderer.invoke("dialog:confirmClearAppCache") as Promise<boolean>,
   confirmResetUiSettings: () =>

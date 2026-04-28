@@ -95,8 +95,8 @@ function onBindListRef(value: Element | ComponentPublicInstance | null) {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  /* 右侧由 .sidebar .virtualList-scroll.sidebarList 的 padding 控制列表与右缘间距 */
-  padding: 6px 0 6px 6px;
+  /* 列表与边缘留白由 .sidebar .virtualList-scroll.sidebarList 的 padding 统一控制 */
+  padding: 0;
   background: var(--bg);
 }
 .sidebarList {
@@ -105,7 +105,7 @@ function onBindListRef(value: Element | ComponentPublicInstance | null) {
   min-width: 0;
 }
 .sidebarList--itemGap :deep(.virtualList-row) {
-  padding-bottom: 1px;
+  padding-bottom: 5px;
 }
 .sidebarItem {
   text-align: left;

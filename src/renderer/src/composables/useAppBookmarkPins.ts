@@ -20,7 +20,7 @@ export function useAppBookmarkPins(deps: {
   fileMetaRecords: Ref<FileMetaRecord[]>;
   lastProbeLine: Ref<number>;
   viewportEndLine: Ref<number>;
-  sidebarTab: Ref<"files" | "chapters" | "bookmarks">;
+  sidebarTab: Ref<"files" | "chapters" | "bookmarks" | "highlights">;
   pulseBookmarkListCenter: () => void;
   upsertBookmark: (path: string, line: number, note: string) => void;
   removeBookmark: (path: string, line: number) => void;
