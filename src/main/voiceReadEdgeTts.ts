@@ -11,6 +11,10 @@ const CHROMIUM_MAJOR_VERSION = "143";
 const WIN_EPOCH_OFFSET = 11644473600n;
 const S_TO_NS = 1000000000n;
 
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 function sha256HexUpper(input: string): string {
   return createHash("sha256").update(input, "utf8").digest("hex").toUpperCase();
 }
@@ -30,6 +34,24 @@ function generateMuid(): string {
 
 function randomHex(len: number): string {
   return randomBytes(len).toString("hex");
+}
+
+function hasSpeakableTtsContent(text: string): boolean {
+  const t = text.replace(/\s+/g, " ").trim();
+  if (!t) return false;
+  return /[\p{L}\p{N}\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]/u.test(t);
+}
+
+/** Edge 不接受的控制字符（与 edge-tts 一致，避免合成失败） */
+function removeIncompatibleCharacters(text: string): string {
+  const chars = [...text];
+  for (let i = 0; i < chars.length; i++) {
+    const code = chars[i]!.charCodeAt(0);
+    if ((code >= 0 && code <= 8) || (code >= 11 && code <= 12) || (code >= 14 && code <= 31)) {
+      chars[i] = " ";
+    }
+  }
+  return chars.join("");
 }
 
 function escapeXml(text: string): string {
@@ -61,15 +83,71 @@ function genMessage(headers: Record<string, string>, content: string): string {
   return `${header}\r\n${content}`;
 }
 
-/**
- * 返回单段 MP3（24kHz mono），供渲染进程播放。
- */
-export async function synthesizeEdgeTtsMp3(
+function toBuffer(data: WebSocket.RawData): Buffer {
+  if (typeof data === "string") return Buffer.from(data, "utf8");
+  if (Buffer.isBuffer(data)) return data;
+  if (Array.isArray(data)) return Buffer.concat(data);
+  return Buffer.from(data as ArrayBuffer);
+}
+
+function parseTextFrame(buf: Buffer): { path: string; body: string } {
+  const text = buf.toString("utf8");
+  const sep = text.indexOf("\r\n\r\n");
+  if (sep < 0) return { path: "", body: text };
+  const headerBlock = text.slice(0, sep);
+  const body = text.slice(sep + 4);
+  let path = "";
+  for (const line of headerBlock.split("\r\n")) {
+    const m = line.match(/^Path:\s*(.+)$/i);
+    if (m) path = m[1]!.trim().toLowerCase();
+  }
+  return { path, body };
+}
+
+function parseBinaryAudioFrame(buf: Buffer): Buffer | null {
+  if (buf.length < 2) return null;
+  const headerLength = buf.readUInt16BE(0);
+  if (headerLength <= 0 || headerLength > buf.length - 2) return null;
+
+  const headerBytes = buf.subarray(2, 2 + headerLength);
+  const body = buf.subarray(2 + headerLength);
+  const headers: Record<string, string> = {};
+  for (const line of headerBytes.toString("utf8").split("\r\n")) {
+    const idx = line.indexOf(":");
+    if (idx > 0) {
+      headers[line.slice(0, idx).trim().toLowerCase()] = line
+        .slice(idx + 1)
+        .trim()
+        .toLowerCase();
+    }
+  }
+
+  if (headers.path !== "audio") return null;
+
+  const contentType = headers["content-type"] ?? "";
+  if (contentType && contentType !== "audio/mpeg") return null;
+  if (body.length === 0) return null;
+
+  return body;
+}
+
+function appendAudioChunk(target: ArrayBuffer, chunk: Buffer): ArrayBuffer {
+  if (chunk.length === 0) return target;
+  const merged = new Uint8Array(target.byteLength + chunk.length);
+  merged.set(new Uint8Array(target), 0);
+  merged.set(chunk, target.byteLength);
+  return merged.buffer;
+}
+
+async function synthesizeEdgeTtsMp3Once(
   req: VoiceReadEdgeTtsRequest,
 ): Promise<ArrayBuffer> {
-  const text = req.text?.trim() ?? "";
+  const text = removeIncompatibleCharacters(req.text?.trim() ?? "");
   if (!text) {
     throw new Error("Edge TTS：文本为空");
+  }
+  if (!hasSpeakableTtsContent(text)) {
+    throw new Error("Edge TTS：无可朗读内容");
   }
   const voice = req.voice?.trim() || "zh-CN-XiaoxiaoNeural";
   const lang = req.lang?.trim() || "zh-CN";
@@ -156,58 +234,44 @@ export async function synthesizeEdgeTtsMp3(
       fn();
     };
 
-    ws.on("message", (data: WebSocket.RawData) => {
+    const finishTurn = () => {
       try {
-        const buf =
-          typeof data === "string"
-            ? Buffer.from(data, "utf8")
-            : Buffer.isBuffer(data)
-              ? data
-              : Array.isArray(data)
-                ? Buffer.concat(data)
-                : Buffer.from(data as ArrayBuffer);
-        const bytes = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
-        if (bytes.length >= 4) {
-          const headerLength = (bytes[0]! << 8) | bytes[1]!;
-          if (
-            headerLength > 0 &&
-            headerLength < 65536 &&
-            bytes.length >= headerLength + 2
-          ) {
-            const newBody = bytes.slice(2 + headerLength);
-            const merged = new Uint8Array(
-              audioData.byteLength + newBody.byteLength,
-            );
-            merged.set(new Uint8Array(audioData), 0);
-            merged.set(newBody, audioData.byteLength);
-            audioData = merged.buffer;
-            return;
+        ws.close();
+      } catch {
+        // ignore
+      }
+      if (!audioData.byteLength) {
+        settle(() =>
+          reject(
+            new Error(
+              `Edge TTS 无音频数据${lastResponseBody ? `：${lastResponseBody.slice(0, 200)}` : ""}`,
+            ),
+          ),
+        );
+      } else {
+        settle(() => resolve(audioData));
+      }
+    };
+
+    ws.on("message", (data: WebSocket.RawData, isBinary: boolean) => {
+      try {
+        const buf = toBuffer(data);
+
+        if (isBinary) {
+          const audioChunk = parseBinaryAudioFrame(buf);
+          if (audioChunk) {
+            audioData = appendAudioChunk(audioData, audioChunk);
           }
+          return;
         }
 
-        const text = buf.toString("utf8");
-        const responseIdx = text.search(/Path:\s*response\b/i);
-        if (responseIdx >= 0) {
-          const sep = text.indexOf("\r\n\r\n", responseIdx);
-          if (sep >= 0) lastResponseBody = text.slice(sep + 4).trim();
+        const { path, body } = parseTextFrame(buf);
+        if (path === "response") {
+          lastResponseBody = body.trim();
+          return;
         }
-        if (text.includes("Path:turn.end") || text.includes("Path: turn.end")) {
-          try {
-            ws.close();
-          } catch {
-            // ignore
-          }
-          if (!audioData.byteLength) {
-            settle(() =>
-              reject(
-                new Error(
-                  `Edge TTS 无音频数据${lastResponseBody ? `：${lastResponseBody.slice(0, 200)}` : ""}`,
-                ),
-              ),
-            );
-          } else {
-            settle(() => resolve(audioData));
-          }
+        if (path === "turn.end") {
+          finishTurn();
         }
       } catch {
         // ignore frame errors
@@ -244,4 +308,28 @@ export async function synthesizeEdgeTtsMp3(
       ws.send(ssmlMsg);
     });
   });
+}
+
+/**
+ * 返回单段 MP3（24kHz mono），供渲染进程播放。
+ * 无音频时自动重试（常见于 Sec-MS-GEC 过期或瞬时断连）。
+ */
+export async function synthesizeEdgeTtsMp3(
+  req: VoiceReadEdgeTtsRequest,
+): Promise<ArrayBuffer> {
+  const maxAttempts = 3;
+  let lastErr: Error | null = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await synthesizeEdgeTtsMp3Once(req);
+    } catch (e) {
+      lastErr = e instanceof Error ? e : new Error(String(e));
+      const retryable =
+        /无音频|连接关闭且无音频|WebSocket|超时/i.test(lastErr.message) &&
+        !/无可朗读内容/.test(lastErr.message);
+      if (!retryable || attempt >= maxAttempts - 1) break;
+      await sleepMs(250 * (attempt + 1));
+    }
+  }
+  throw lastErr ?? new Error("Edge TTS 合成失败");
 }

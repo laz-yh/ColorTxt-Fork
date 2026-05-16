@@ -9,6 +9,7 @@ import {
 } from "../constants/voiceRead";
 import { VoiceReadLinePlayer } from "../services/voiceRead/voiceReadLinePlayer";
 import {
+  hasVoiceReadSpeakableText,
   splitVoiceReadChunks,
   VOICE_READ_CHUNK_UNITS_DEFAULT,
   VOICE_READ_CHUNK_UNITS_EDGE,
@@ -192,16 +193,21 @@ export function useAppVoiceRead(deps: {
     const reader = deps.readerRef.value;
     const mCount = reader?.getModelLineCount?.() ?? 0;
     if (!reader || batchEnd >= mCount) return;
-    const rawAfter = reader.getEditorLineContent?.(batchEnd + 1) ?? "";
-    const textAfter = rawAfter.trim() ? rawAfter : " ";
-    player.startPrefetch(settings, textAfter);
+    for (let L = batchEnd + 1; L <= mCount; L++) {
+      const rawAfter = reader.getEditorLineContent?.(L) ?? "";
+      const t = rawAfter.replace(/\s+/g, " ").trim();
+      if (!hasVoiceReadSpeakableText(t)) continue;
+      player.startPrefetch(settings, t);
+      return;
+    }
   }
 
   function warmLineText(line: number, settings: VoiceReadSettings) {
     const reader = deps.readerRef.value;
     if (!reader || line < 1) return;
     const raw = reader.getEditorLineContent?.(line) ?? "";
-    if (!raw.trim()) return;
+    const t = raw.replace(/\s+/g, " ").trim();
+    if (!hasVoiceReadSpeakableText(t)) return;
     player.warmLine(settings, raw);
   }
 
@@ -238,7 +244,6 @@ export function useAppVoiceRead(deps: {
       }
       const ln = Math.max(1, Math.min(currentLine, mCount));
       currentLine = ln;
-      scrollAndHighlightLine(ln);
 
       const batchEnd = Math.min(mCount, ln + VOICE_READ_BATCH_LINES - 1);
       const settings = effectiveSettingsForSpeak();
@@ -248,10 +253,9 @@ export function useAppVoiceRead(deps: {
       for (let L = ln; L <= batchEnd; L++) {
         const rawL = reader.getEditorLineContent?.(L) ?? "";
         const t = rawL.replace(/\s+/g, " ").trim();
-        if (!t) continue;
+        if (!hasVoiceReadSpeakableText(t)) continue;
         const parts = splitVoiceReadChunks(t, units);
-        const useParts = parts.length > 0 ? parts : [t];
-        for (const p of useParts) {
+        for (const p of parts) {
           chunks.push(p);
           chunkToModelLine.push(L);
         }
@@ -272,10 +276,13 @@ export function useAppVoiceRead(deps: {
         continue;
       }
 
+      const anchorLn = chunkToModelLine[0] ?? ln;
+      currentLine = anchorLn;
+      scrollAndHighlightLine(anchorLn);
       prefetchLineAfterBatch(batchEnd, settings);
-      syncPlaybackChunkAnchor(0, chunkToModelLine, ln);
-      warmAdjacentSpeakableLines(ln);
-      bindChunkHighlight(gen, chunkToModelLine, ln, 0);
+      syncPlaybackChunkAnchor(0, chunkToModelLine, anchorLn);
+      warmAdjacentSpeakableLines(anchorLn);
+      bindChunkHighlight(gen, chunkToModelLine, anchorLn, 0);
 
       try {
         await player.speakChunks(settings, chunks);
@@ -300,10 +307,25 @@ export function useAppVoiceRead(deps: {
     }
   }
 
+  function resolveSpeakableStartLine(line: number): number {
+    const reader = deps.readerRef.value;
+    const mCount = reader?.getModelLineCount?.() ?? 0;
+    if (!reader || mCount < 1) return 1;
+    const ln = Math.max(1, Math.min(Math.floor(line), mCount));
+    if (lineHasSpeakableContent(ln)) return ln;
+    const next = findAdjacentSpeakableLine(ln, 1);
+    if (lineHasSpeakableContent(next)) return next;
+    const prev = findAdjacentSpeakableLine(ln, -1);
+    if (lineHasSpeakableContent(prev)) return prev;
+    return ln;
+  }
+
   function startFromViewportCenter() {
     const reader = deps.readerRef.value;
     if (!reader) return;
-    const ln = reader.getModelLineAtViewportCenter?.() ?? 1;
+    const ln = resolveSpeakableStartLine(
+      reader.getModelLineAtViewportCenter?.() ?? 1,
+    );
     syncToolbarFromPersisted();
     lastCompletedBatchEndLine = 0;
     mode.value = "playing";
@@ -367,7 +389,7 @@ export function useAppVoiceRead(deps: {
     const t = (reader.getEditorLineContent?.(line) ?? "")
       .replace(/\s+/g, " ")
       .trim();
-    return t.length > 0;
+    return hasVoiceReadSpeakableText(t);
   }
 
   function findAdjacentSpeakableLine(line: number, delta: -1 | 1): number {
@@ -439,7 +461,9 @@ export function useAppVoiceRead(deps: {
     const reader = deps.readerRef.value;
     const mCount = reader?.getModelLineCount?.() ?? 0;
     if (!reader || mCount < 1) return;
-    const ln = Math.max(1, Math.min(Math.floor(line), mCount));
+    const ln = resolveSpeakableStartLine(
+      Math.max(1, Math.min(Math.floor(line), mCount)),
+    );
 
     playbackLoopGen += 1;
     player.onChunkChange = undefined;
@@ -531,18 +555,9 @@ export function useAppVoiceRead(deps: {
     const mCount = reader?.getModelLineCount?.() ?? 0;
     if (!reader || mCount < 1) return;
 
-    let ln = Math.max(
-      1,
-      Math.min(reader.getModelLineAtViewportCenter?.() ?? 1, mCount),
+    const ln = resolveSpeakableStartLine(
+      reader.getModelLineAtViewportCenter?.() ?? 1,
     );
-    if (!lineHasSpeakableContent(ln)) {
-      const next = findAdjacentSpeakableLine(ln, 1);
-      if (lineHasSpeakableContent(next)) ln = next;
-      else {
-        const prev = findAdjacentSpeakableLine(ln, -1);
-        if (lineHasSpeakableContent(prev)) ln = prev;
-      }
-    }
 
     restartPlaybackFromLine(ln);
   }

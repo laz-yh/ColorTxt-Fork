@@ -8,6 +8,7 @@
 import type { VoiceReadSettings } from "../../constants/voiceRead";
 import { toVoiceReadEdgeTtsRequest } from "../../constants/voiceRead";
 import {
+  hasVoiceReadSpeakableText,
   splitVoiceReadChunks,
   VOICE_READ_CHUNK_UNITS_DEFAULT,
   VOICE_READ_CHUNK_UNITS_EDGE,
@@ -20,6 +21,21 @@ const DASH_PCM_CACHE_LIMIT = 48;
 
 function sleepMs(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Edge 返回的 MP3 至少应具备 ID3 或 MPEG 帧同步头 */
+function isEdgeMp3PayloadValid(buf: ArrayBuffer): boolean {
+  if (buf.byteLength < 10) return false;
+  const u8 = new Uint8Array(buf, 0, Math.min(buf.byteLength, 4));
+  if (u8[0] === 0x49 && u8[1] === 0x44 && u8[2] === 0x33) return true;
+  if (u8[0] === 0xff && (u8[1]! & 0xe0) === 0xe0) return true;
+  return false;
+}
+
+function isDecodeAudioDataEncodingError(err: unknown): boolean {
+  if (err instanceof DOMException && err.name === "EncodingError") return true;
+  if (err instanceof Error && /decode audio/i.test(err.message)) return true;
+  return false;
 }
 
 function normalizeLineText(text: string): string {
@@ -292,58 +308,89 @@ export class VoiceReadLinePlayer {
   }
 
   /**
-   * 仅在「播放已追上排程、正在等当前段合成」时亮合成 UI；
-   * 提前 fetch 下一段（边播边预合成）不触发。
+   * 仅在「时间线已播完排程、下一段仍未就绪」时亮合成 UI。
+   * 边播边预合成、缓存命中、时间线仍有缓冲时不显示。
    */
   private async awaitWhenPlaybackBlocked<T>(
     playbackCaughtUp: () => boolean,
     work: Promise<T>,
-    options?: { showOnStart?: boolean },
   ): Promise<T> {
     if (this.stopped) throw new Error("aborted");
 
-    if (options?.showOnStart ?? playbackCaughtUp()) {
-      this.setPlaybackSynthesizing(true);
-      try {
-        return await work;
-      } finally {
+    let uiActive = false;
+    const syncUi = () => {
+      const want = playbackCaughtUp() && !this.stopped;
+      if (want && !uiActive) {
+        uiActive = true;
+        this.setPlaybackSynthesizing(true);
+      } else if (!want && uiActive) {
+        uiActive = false;
         this.setPlaybackSynthesizing(false);
       }
-    }
+    };
 
-    while (true) {
-      if (this.stopped) throw new Error("aborted");
-      const raced = await Promise.race([
-        work.then((v) => ({ kind: "done" as const, v })),
-        sleepMs(80).then(() => ({ kind: "tick" as const })),
-      ]);
-      if (raced.kind === "done") return raced.v;
-      if (this.stopped) throw new Error("aborted");
-      if (!playbackCaughtUp()) continue;
-      this.setPlaybackSynthesizing(true);
-      try {
-        return await work;
-      } finally {
+    try {
+      while (true) {
+        const raced = await Promise.race([
+          work.then((v) => ({ kind: "done" as const, v })),
+          sleepMs(80).then(() => ({ kind: "tick" as const })),
+        ]);
+        if (raced.kind === "done") return raced.v;
+        if (this.stopped) throw new Error("aborted");
+        syncUi();
+      }
+    } finally {
+      if (uiActive) {
+        uiActive = false;
         this.setPlaybackSynthesizing(false);
       }
     }
+  }
+
+  private invalidateEdgeChunkCache(
+    settings: VoiceReadSettings,
+    text: string,
+  ): void {
+    const k = chunkCacheKey(settings, text);
+    this.edgeMp3Cache.delete(k);
+    this.edgeMp3Inflight.delete(k);
+  }
+
+  /** 预取队列用：挂上 rejection 处理，避免 producer 先于 consumer await 时 Uncaught */
+  private enqueueEdgeMp3Fetch(
+    settings: VoiceReadSettings,
+    text: string,
+  ): Promise<ArrayBuffer> {
+    const p = this.getEdgeMp3(settings, text);
+    void p.catch(() => {});
+    return p;
   }
 
   private async getEdgeMp3(
     settings: VoiceReadSettings,
     text: string,
   ): Promise<ArrayBuffer> {
+    if (!hasVoiceReadSpeakableText(text)) {
+      return Promise.reject(new Error("无可朗读内容"));
+    }
     const k = chunkCacheKey(settings, text);
     const cached = this.edgeMp3Cache.get(k);
     if (cached) {
-      this.touchEdgeMp3Cache(k, cached);
-      return this.cloneArrayBuffer(cached);
+      if (!isEdgeMp3PayloadValid(cached)) {
+        this.edgeMp3Cache.delete(k);
+      } else {
+        this.touchEdgeMp3Cache(k, cached);
+        return this.cloneArrayBuffer(cached);
+      }
     }
     const inflight = this.edgeMp3Inflight.get(k);
     if (inflight) return this.cloneArrayBuffer(await inflight);
 
     const request = this.fetchEdgeMp3(settings, text)
       .then((data) => {
+        if (!isEdgeMp3PayloadValid(data)) {
+          throw new Error("Edge TTS 返回无效音频");
+        }
         const copy = this.cloneArrayBuffer(data);
         if (!this.edgeSkipCacheKeys.delete(k)) {
           this.touchEdgeMp3Cache(k, copy);
@@ -362,6 +409,9 @@ export class VoiceReadLinePlayer {
     text: string,
     signal: AbortSignal,
   ): Promise<PreparedDashLine> {
+    if (!hasVoiceReadSpeakableText(text)) {
+      return Promise.reject(new Error("无可朗读内容"));
+    }
     const k = chunkCacheKey(settings, text);
     const cached = this.dashPcmCache.get(k);
     if (cached) {
@@ -452,7 +502,7 @@ export class VoiceReadLinePlayer {
   warmLine(settings: VoiceReadSettings, text: string): void {
     if (settings.engine === "system") return;
     const t = normalizeLineText(text);
-    if (!t) return;
+    if (!t || !hasVoiceReadSpeakableText(t)) return;
     if (settings.engine === "dashscope") {
       const chunks = splitVoiceReadChunks(t, VOICE_READ_CHUNK_UNITS_DEFAULT);
       for (const c of chunks.length > 0 ? chunks : [t]) {
@@ -467,7 +517,7 @@ export class VoiceReadLinePlayer {
     for (const c of chunks.length > 0 ? chunks : [t]) {
       const k = chunkCacheKey(settings, c);
       if (this.edgeMp3Cache.has(k) || this.edgeMp3Inflight.has(k)) continue;
-      void this.getEdgeMp3(settings, c).catch(() => new ArrayBuffer(0));
+      void this.getEdgeMp3(settings, c).catch(() => {});
     }
   }
 
@@ -576,8 +626,9 @@ export class VoiceReadLinePlayer {
   speakChunks(settings: VoiceReadSettings, chunks: string[]): Promise<void> {
     const parts = chunks
       .map((c) => normalizeLineText(c))
-      .filter((c) => c.length > 0);
-    const use = parts.length > 0 ? parts : [" "];
+      .filter((c) => c.length > 0 && hasVoiceReadSpeakableText(c));
+    if (parts.length === 0) return Promise.resolve();
+    const use = parts;
     this.abortActivePlayback();
     this.stopped = false;
     if (settings.engine === "system") {
@@ -591,7 +642,7 @@ export class VoiceReadLinePlayer {
 
   speakLine(settings: VoiceReadSettings, text: string): Promise<void> {
     const t = normalizeLineText(text);
-    if (!t) return Promise.resolve();
+    if (!t || !hasVoiceReadSpeakableText(t)) return Promise.resolve();
 
     const key = lineCacheKey(settings, text);
     let dashPrepared: Promise<PreparedDashLine> | null = null;
@@ -617,13 +668,18 @@ export class VoiceReadLinePlayer {
     }
 
     if (settings.engine === "dashscope" && dashPrepared) {
-      return this.awaitWhenPlaybackBlocked(() => true, dashPrepared, {
-        showOnStart: true,
-      }).then(
-        async (p) => {
-          if (this.stopped) return;
-          await this.playDashSingleBuffer(settings, p.pcm, p.sampleRate);
-        },
+      const playPrepared = async (p: PreparedDashLine) => {
+        if (this.stopped) return;
+        await this.playDashSingleBuffer(settings, p.pcm, p.sampleRate);
+      };
+      const loadPrepared = this.dashPcmCache.has(key)
+        ? dashPrepared
+        : this.awaitWhenPlaybackBlocked(
+            () => this.isDashPlaybackCaughtUp(),
+            dashPrepared,
+          );
+      return loadPrepared.then(
+        playPrepared,
         () =>
           this.speakDashChunks(
             settings,
@@ -786,24 +842,28 @@ export class VoiceReadLinePlayer {
     for (let p = 0; p < prewarm; p++) {
       if (this.stopped) return;
       const ch = chunks[p]!;
-      const promise = this.getEdgeMp3(settings, ch).catch(
-        () => new ArrayBuffer(0),
-      );
-      this.edgeFetchBuffer.set(p, promise);
+      this.edgeFetchBuffer.set(p, this.enqueueEdgeMp3Fetch(settings, ch));
       this.edgeProducerIndex = p + 1;
     }
 
     let edgeChunkError: unknown = null;
     for (let i = 0; i < chunks.length; i++) {
       if (this.stopped) break;
+      const settings = this.edgeSettings;
+      const ch = chunks[i];
+      if (!settings || !ch) continue;
       try {
-        const buf = await this.waitEdgeChunk(i);
-        if (this.stopped) break;
-        await this.edgeDecodeAndSchedule(buf, i, chunks.length);
+        await this.playEdgeChunkAtIndex(i, chunks.length, settings, ch);
       } catch (e) {
         if ((e as Error)?.message === "aborted") break;
+        const msg = (e as Error)?.message ?? "";
+        if (/无可朗读内容/.test(msg)) {
+          this.edgeFetchBuffer.delete(i);
+          this.edgeProducerWake?.();
+          continue;
+        }
         if (!edgeChunkError) edgeChunkError = e;
-        console.error("[VoiceRead Edge] chunk error:", e);
+        throw e;
       }
       this.edgeFetchBuffer.delete(i);
       this.edgeProducerWake?.();
@@ -864,10 +924,7 @@ export class VoiceReadLinePlayer {
       if (this.stopped) return;
       const idx = this.edgeProducerIndex++;
       const ch = chunks[idx]!;
-      const promise = this.getEdgeMp3(settings, ch).catch(
-        () => new ArrayBuffer(0),
-      );
-      this.edgeFetchBuffer.set(idx, promise);
+      this.edgeFetchBuffer.set(idx, this.enqueueEdgeMp3Fetch(settings, ch));
     }
   }
 
@@ -877,11 +934,69 @@ export class VoiceReadLinePlayer {
       await new Promise<void>((r) => setTimeout(r, 50));
     }
     const promise = this.edgeFetchBuffer.get(index)!;
+    const settings = this.edgeSettings;
+    const ch = this.edgeChunks[index];
+    if (
+      settings &&
+      ch &&
+      this.edgeMp3Cache.has(chunkCacheKey(settings, ch))
+    ) {
+      return promise;
+    }
     return this.awaitWhenPlaybackBlocked(
       () => this.isEdgePlaybackCaughtUp(),
       promise,
-      { showOnStart: index === 0 },
     );
+  }
+
+  /** 拉取并解码单段；合成/解码失败时作废缓存并重试（含主进程自动重试后仍失败） */
+  private async playEdgeChunkAtIndex(
+    index: number,
+    total: number,
+    settings: VoiceReadSettings,
+    text: string,
+  ): Promise<void> {
+    if (!hasVoiceReadSpeakableText(text)) return;
+
+    const maxAttempts = 4;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (this.stopped) throw new Error("aborted");
+      if (attempt > 0) {
+        this.invalidateEdgeChunkCache(settings, text);
+        await sleepMs(200 * attempt);
+      }
+
+      let buf: ArrayBuffer;
+      try {
+        buf =
+          attempt === 0
+            ? await this.waitEdgeChunk(index)
+            : await this.getEdgeMp3(settings, text);
+      } catch (e) {
+        if ((e as Error)?.message === "aborted") throw e;
+        if (/无可朗读内容/.test((e as Error)?.message ?? "")) return;
+        if (attempt < maxAttempts - 1) continue;
+        throw e;
+      }
+
+      if (this.stopped) throw new Error("aborted");
+      if (!isEdgeMp3PayloadValid(buf)) {
+        this.invalidateEdgeChunkCache(settings, text);
+        if (attempt < maxAttempts - 1) continue;
+        throw new Error("Edge TTS 返回无效音频");
+      }
+
+      try {
+        await this.edgeDecodeAndSchedule(buf, index, total);
+        return;
+      } catch (e) {
+        if (isDecodeAudioDataEncodingError(e) && attempt < maxAttempts - 1) {
+          this.invalidateEdgeChunkCache(settings, text);
+          continue;
+        }
+        throw e;
+      }
+    }
   }
 
   private async edgeDecodeAndSchedule(
@@ -890,6 +1005,9 @@ export class VoiceReadLinePlayer {
     total: number,
   ): Promise<void> {
     if (!this.edgeAudioCtx || !this.edgeGain || this.stopped) return;
+    if (!isEdgeMp3PayloadValid(mp3Data)) {
+      throw new Error("Edge TTS 音频无效");
+    }
 
     const audioBuffer = await this.edgeAudioCtx.decodeAudioData(
       mp3Data.slice(0),
@@ -1045,11 +1163,13 @@ export class VoiceReadLinePlayer {
     total: number,
     signal: AbortSignal,
   ): Promise<void> {
-    const prepared = await this.awaitWhenPlaybackBlocked(
-      () => this.isDashPlaybackCaughtUp(),
-      this.getDashChunkPrepared(settings, text, signal),
-      { showOnStart: index === 0 },
-    );
+    const fetchPrepared = this.getDashChunkPrepared(settings, text, signal);
+    const prepared = this.dashPcmCache.has(chunkCacheKey(settings, text))
+      ? await fetchPrepared
+      : await this.awaitWhenPlaybackBlocked(
+          () => this.isDashPlaybackCaughtUp(),
+          fetchPrepared,
+        );
     if (this.stopped || signal.aborted) return;
     this.scheduleDashChunkPlayback(prepared.pcm, index, total);
   }
