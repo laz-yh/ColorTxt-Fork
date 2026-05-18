@@ -320,11 +320,12 @@ export function useAppVoiceRead(deps: {
     return ln;
   }
 
-  function startFromViewportCenter() {
+  /** 顶栏进入朗读：从视口内首行起播（非视口中心） */
+  function startFromViewportTop() {
     const reader = deps.readerRef.value;
     if (!reader) return;
     const ln = resolveSpeakableStartLine(
-      reader.getModelLineAtViewportCenter?.() ?? 1,
+      reader.getViewportTopLine?.() ?? 1,
     );
     syncToolbarFromPersisted();
     lastCompletedBatchEndLine = 0;
@@ -542,7 +543,7 @@ export function useAppVoiceRead(deps: {
   function toggleVoiceReadToolbar() {
     if (mode.value === "off") {
       if (!canStartVoiceRead.value) return;
-      startFromViewportCenter();
+      startFromViewportTop();
     } else {
       exitVoiceRead();
     }
