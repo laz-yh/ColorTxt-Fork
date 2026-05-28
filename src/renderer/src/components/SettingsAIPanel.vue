@@ -418,15 +418,15 @@ async function runChatConnectionTest(): Promise<ConnectionTestResult> {
       <section class="aiSection aiSection--compact">
         <div class="aiMasterToggleRow">
           <span class="settingsLabel aiMasterToggleLabel"
-            >输出思维导图</span
+            >生成思维导图</span
           >
           <SwitchToggle
             v-model="modelValue.autoMindmapOnSummaryAndCharacters"
-            aria-label="输出思维导图"
+            aria-label="生成思维导图"
           />
         </div>
         <p class="aiMasterHint">
-          开启后，当问题涉及「内容概括」或「人物关系」时，阅读助手会自动生成思维导图。<br />关闭后，也可以在问题中带上「思维导图」关键字来让阅读助手生成思维导图。
+          开启后，当问题涉及「内容概括」或「人物关系」时，阅读助手会自动生成思维导图；<br />关闭后，也可以在问题中带上「思维导图」等关键字来让阅读助手生成思维导图。
         </p>
       </section>
 
