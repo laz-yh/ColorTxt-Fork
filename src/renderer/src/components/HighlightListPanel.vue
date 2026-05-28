@@ -142,7 +142,7 @@ const emptyMessage = computed(() => {
     </div>
     <div v-if="highlightTerms.length > 0" class="sidebarTabFooter">
       <span class="sidebarTabFooterStat"
-        >共 {{ highlightTerms.length }} 个高亮词</span
+        >共 {{ highlightTerms.length }} 个</span
       >
       <div class="sidebarTabFooterActions">
         <button
