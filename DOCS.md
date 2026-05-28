@@ -303,7 +303,8 @@ src/
 │       │   ├── aiAssistantPlainText.ts  # 可复制纯文本
 │       │   ├── aiAssistantDbMessages.ts # DB 行与 UI 互转
 │       │   ├── aiAssistantHistoryFormat.ts # 历史快照格式
-│       │   └── aiAssistantExport.ts     # 对话导出
+│       │   ├── aiAssistantExport.ts     # 对话导出
+│       │   └── parseMindmapToolResult.ts # mindmap 工具 JSON → UI 附件
 │       ├── directives/
 │       │   └── aiStickScroll.ts  # 助手折叠区粘底
 │       ├── services/
@@ -359,6 +360,7 @@ src/
     ├── aiSkills.ts                 # 技能元数据与合并工具
     ├── aiAgentSkillToolNames.ts    # Agent 技能名常量
     ├── aiChapterRefPrompt.ts       # 章节引用提示词约定
+    ├── aiMindmapIntent.ts          # 概括/人物/显式导图意图与 rag 后追问
     ├── characterTypes.ts           # 角色侧栏类型
     ├── characterPortraitPaths.ts   # 立绘路径与文件名约定
     ├── chapterMatchBuiltinPatterns.ts # 内置章节正则
@@ -562,7 +564,7 @@ src/
 - **`readerSurroundingPlainText.ts`**：视口附近节选（注入 `AIAgentBookMeta.surroundingText`）。
 - **`aiMarkdownMarkedSetup.ts`**：`marked.use(marked-katex-extension)`：统一导出配置好的 `marked`（助手 Markdown 入口）。
 - **`aiMarkdownMarkedPrep.ts`**：助手消息正文预处理再交给 marked。
-- **`aiMarkdownChapterRef.ts`**：助手回复中章节引用类 token 的解析 / 链接化（与 `@shared/aiChapterRefPrompt` 约定配合）。
+- **`aiMarkdownChapterRef.ts`**：章节引用 token 的归一化（`（ch=a,b）`、`（ch=a-b）`、序号后说明外移等）、助手回复链接化（`AiMarkdown`）、导图展示时替换为章节标题（`substituteAiChapterMarkersWithTitles`）；跳转按钮 hover **`title`** 为章节名。
 - **`aiToolFoldBody.ts`**：工具折叠区正文 HTML 辅助；将进度文案中的 **`当前进度：M/N`** 包为 `.aiDigestProgressFrac`（warning 加粗）。
 
 ##### `src/shared/`
@@ -1247,6 +1249,24 @@ cardShellWrap（悬停抬高 z-index）
 
 渲染侧 **`useAiChapterPlainTextBridge`**（`App.vue`）监听 **`ai:chapter-plain-request`**，用 **`getChapterPlainTextByIndex`** 回复；preload 暴露 **`onChapterPlainRequest`** / **`replyChapterPlainText`**。
 
+### 思维导图（`mindmap` 工具）
+
+阅读助手在概括剧情、了解人物关系或用户明确要求可视化时，可由 Agent 调用 **`mindmap`** 工具，在对话中嵌入 **markmap** 导图（非 Mermaid 正文图）。UI 由 **`AiMindmapView.vue`** 承载，数据经 **`parseMindmapToolResult.ts`** 挂到工具行。
+
+| 项 | 说明 |
+| ---- | ---- |
+| 工具参数 | `reasoning`、`title`、`markdown`（`#` / `##` / `###` / `-` 层级；禁止 Mermaid `mindmap` 语法） |
+| 数据流 | 须先 **`ragSearch` / `ragContext`**；全书概括（如快速提问「概括本书内容」）以 **`ragSearch`** 跨章为主；本章问题仍优先 **`ragContext(当前章)`** |
+| 侧栏预览 | 工具折叠下方缩略图（`preview` 默认）：**仅展示**（`pointer-events: none`），不可拖拽；标题行与 **`AiAssistantDetailsFold`** 对齐（`icons.mindmap`）；点击预览区打开全屏；视口高度随侧栏宽度与内容约 **160–420px** 自适应；侧栏/导图 resize 时 markmap **300ms** 过渡；预览区文字不可选中 |
+| 全屏大图 | `Teleport` 弹层：视口固定边距 **`padding: 6vh 4vw`**（随窗口放大，**无** 960×720 上限）；开/关 **Transition**（与 **`AppModal`** 同系淡入 + 面板缩放）；**复原**（`icons.reset`）、**导出 SVG**、**关闭**（全局 **`aiActivityLikeBtn`**，关闭钮 danger hover）；底部一行左 **节点数/深度**、右操作说明；**滚轮缩放**（`scrollForPan: false`）；Esc/遮罩关闭后 **`blur`** 预览区，避免侧栏残留聚焦蓝框 |
+| 章节标记 | 展示前经 **`aiMarkdownChapterRef`**：`（ch=N）` 等替换为当前书 **章节标题**（`AiAssistantChatMessages` 传入 `chapters`）；持久化 JSON 仍为模型原始 markdown。与助手正文共用归一化（`（ch=a-b）`、序号后说明外移等），见 **`aiChapterRefPrompt`** |
+| 持久化 | 工具结果 JSON 写入 SQLite **`messages`**（`role=tool`，`tool_name=mindmap`）；重开会话由 **`aiAssistantDbMessages`** 还原 |
+| 自动出图 | **设置 → AI 阅读助手 →「概括与人物类问题自动输出思维导图」**（`AIConfig.autoMindmapOnSummaryAndCharacters`，默认开启）。关闭后仅在用户提到「思维导图」「导图」等时注入出图提示；**不**写死全部快速提问 |
+| 默认快速提问 | `这章讲了什么`、`本书的主角与重要配角都有谁`、`概括本书内容`（`DEFAULT_AI_QUICK_QUESTIONS`，仅配置缺省/空列表时回退） |
+| 依赖 | **`markmap-lib`** / **`markmap-view`** 为 devDependencies，打进 renderer bundle（与 `marked` 类似，非整包 `node_modules` 外链） |
+
+意图与 rag 后追问：**`@shared/aiMindmapIntent`**；主进程转换与统计：**`aiMindmapTool.ts`**（含 Mermaid `mindmap` 语法兜底转 Markdown 层级）。
+
 ### Token 用量
 
 - **总开关**：**设置 → AI 阅读助手 →「显示 Token 消耗信息」**（`AIConfig.showTokenUsage`，默认开启）。关闭后侧栏不展示 Token 条，设置内 **「每百万 Token 价格」** 区块一并隐藏。
@@ -1282,7 +1302,8 @@ cardShellWrap（悬停抬高 z-index）
 | `ReaderSidebar.vue` | 侧栏容器：活动栏含 **AI 助手**、**角色** 等（`constants/readerSidebarTab.ts`）。<br>挂载 **`AiAssistantPanel`**、**`CharacterSidebarPanel`** 等；**角色 → 更多 → 卡片效果** 子菜单（`CHARACTER_CARD_TEXTURE_EFFECTS`、分隔线、`AppShellMenuTeleport`）；`v-model:character-card-texture-effect` 与 `App.vue` 同步 |
 | `SettingsPanel.vue` | 设置壳层：确定时校验向量维度、**数据/模型缓存目录迁移**、`configSet` 与 `emit('apply')`；「清除缓存」见数据存储章 |
 | `SettingsTabBar.vue` | 页签含 `ai` / `vectorModel` / `txt2img` / `skills`。<br>`showAiExtensionTabs` 为 false 时隐藏向量模型 / 角色卡 / 技能扩展页签 |
-| `SettingsAIPanel.vue` | 「AI 阅读助手」：总开关；服务商 + 地址；API Key + **测试连接**；模型 / 温度；Token 与 **`aiDataCacheDir`** |
+| `SettingsAIPanel.vue` | 「AI 阅读助手」：总开关；服务商 + 地址；API Key + **测试连接**；模型 / 温度；Token 与 **`aiDataCacheDir`**；**概括与人物类自动思维导图**；快速提问列表 |
+| `AiMindmapView.vue` | 阅读助手思维导图：侧栏预览 + 全屏交互（markmap）；章节标题替换、SVG 导出 |
 | `ApiEndpointInput.vue` | 接口地址手填输入框 |
 | `AiTokenUsageBanner.vue` | Token 消耗与花费展示条（阅读助手、角色检索共用） |
 | `AiIndexProgressBanner.vue` | 向量建索引进度条（阅读助手建索引、角色检索前补索引） |
@@ -1293,8 +1314,8 @@ cardShellWrap（悬停抬高 z-index）
 | `SettingsSkillEditModal.vue` | 自定义技能新建/编辑弹窗 |
 | `AppPullFlashButton.vue` | 设置面板内刷新模型/采样器列表等，完成态闪光反馈 |
 | `PathPickerInput.vue` | 目录选择（含 **角色立绘缓存根目录** 等） |
-| `AiAssistantPanel.vue` | 侧栏 AI 阅读助手主面板：会话、输入、`onAgentEvent`（流式增量、工具、`token_usage_*`、`done`/`error`）；**`findLiveAgentAssistant`**；受 **`showTokenUsage`** 控制 Token 条 |
-| `AiAssistantChatMessages.vue` | 消息列表：用户/助手气泡、思考块、工具折叠；**`AiTokenUsageBanner`**（预估/实际） |
+| `AiAssistantPanel.vue` | 侧栏 AI 阅读助手主面板：会话、输入、`onAgentEvent`（流式增量、工具、`token_usage_*`、`done`/`error`）；历史列表会话名 **`title`** 悬停提示；**`findLiveAgentAssistant`**；受 **`showTokenUsage`** 控制 Token 条 |
+| `AiAssistantChatMessages.vue` | 消息列表：用户/助手气泡、思考块、工具折叠、**`AiMindmapView`**（传入 `chapters`）；**`AiMarkdown`** 章节跳转；**`AiTokenUsageBanner`** |
 | `AiAssistantDetailsFold.vue` | 助手详情折叠（与 `directives/aiStickScroll`、`useAiFoldContentSelectAll` 配合） |
 | `AiToolFoldBody.vue` | 工具折叠正文；超长章压缩进度中 **`当前进度：M/N`** 高亮（`utils/aiToolFoldBody.ts`） |
 | `AiMarkdown.vue` | 助手回复 Markdown（`aiMarkdownMarkedSetup` / `Prep`、`aiMarkdownChapterRef`） |

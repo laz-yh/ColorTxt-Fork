@@ -34,6 +34,7 @@ import {
 import { dirnameFs, joinFs } from "../ebook/pathUtils";
 import AiAssistantChatMessages from "./AiAssistantChatMessages.vue";
 import { rowsToUiMessages } from "../aiAssistant/aiAssistantDbMessages";
+import { parseMindmapToolResult } from "../aiAssistant/parseMindmapToolResult";
 import type { UiTokenUsageMsg } from "../aiAssistant/aiAssistantTypes";
 import {
   buildChatExportDefaultName,
@@ -909,6 +910,7 @@ onMounted(() => {
           toolCallId: ev.toolCallId,
           name: ev.name,
           argsPreview: ev.argsPreview,
+          argsJson: ev.argsJson,
           status: "running",
           preview: "",
           full: "",
@@ -934,6 +936,11 @@ onMounted(() => {
           t.status = ev.ok ? "done" : "error";
           t.preview = ev.preview;
           t.full = ev.full;
+          if (ev.name === "mindmap" && ev.ok) {
+            t.mindmap = parseMindmapToolResult(ev.full) ?? undefined;
+          } else {
+            t.mindmap = undefined;
+          }
         }
         break;
       }
@@ -1765,9 +1772,11 @@ defineExpose({
               >
                 <div class="aiHistoryDropdownRowBody">
                   <div class="aiHistoryDropdownTitleRow">
-                    <span class="aiHistoryDropdownLabel">{{
-                      t.title || "未命名"
-                    }}</span>
+                    <span
+                      class="aiHistoryDropdownLabel"
+                      :title="t.title || '未命名'"
+                      >{{ t.title || "未命名" }}</span
+                    >
                     <time
                       class="aiHistoryDropdownTime"
                       :datetime="new Date(t.updatedAt).toISOString()"
@@ -1868,6 +1877,7 @@ defineExpose({
             :token-price-per-million="
               showTokenUsage ? chatTokenPricePerMillion : null
             "
+            :chapters="chapters"
             @chapter-click="onChClick"
           />
         </div>
@@ -2084,46 +2094,6 @@ defineExpose({
   align-items: center;
   gap: 2px;
   flex-shrink: 0;
-}
-
-/**
- * 与左侧活动栏图标按钮同系（透明底、tab 字色），
- * 尺寸与当前行模型下拉触发器高度对齐。
- */
-.aiActivityLikeBtn {
-  box-sizing: border-box;
-  flex-shrink: 0;
-  width: 24px;
-  height: 24px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  margin: 0;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  cursor: pointer;
-  color: var(--tab-fg);
-}
-
-.aiActivityLikeBtn:hover:not(:disabled) {
-  color: var(--tab-fg-hover);
-  background: var(--icon-btn-bg-hover);
-}
-
-.aiActivityLikeBtn:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-
-.aiActivityLikeBtn .svg :deep(svg) {
-  width: 16px;
-  height: 16px;
-}
-
-.aiActivityLikeBtn .svg :deep(svg path) {
-  fill: currentColor;
 }
 
 .svg :deep(svg) {

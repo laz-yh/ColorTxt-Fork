@@ -5,6 +5,7 @@ import enterFullscreenIcon from "./assets/enter_fullscreen.svg?raw";
 import leaveFullscreenIcon from "./assets/leave_fullscreen.svg?raw";
 import paletteIcon from "./assets/palette.svg?raw";
 import moreIcon from "./assets/more.svg?raw";
+import mindmapIcon from "./assets/mindmap.svg?raw";
 import findIcon from "./assets/find.svg?raw";
 import regExpIcon from "./assets/RegExp.svg?raw";
 import githubIcon from "./assets/GitHub.svg?raw";
@@ -53,6 +54,7 @@ import successIcon from "./assets/success.svg?raw";
 import viewIcon from "./assets/view.svg?raw";
 import viewOffIcon from "./assets/view_off.svg?raw";
 import refreshIcon from "./assets/refresh.svg?raw";
+import resetIcon from "./assets/reset.svg?raw";
 import unknowIcon from "./assets/unknow.svg?raw";
 import failIcon from "./assets/fail.svg?raw";
 import stopIcon from "./assets/stop.svg?raw";
@@ -75,6 +77,8 @@ export const icons = {
   leaveFullscreen: leaveFullscreenIcon,
   palette: paletteIcon,
   more: moreIcon,
+  /** 思维导图面板标题 */
+  mindmap: mindmapIcon,
   find: findIcon,
   regExp: regExpIcon,
   github: githubIcon,
@@ -123,6 +127,8 @@ export const icons = {
   view: viewIcon,
   viewOff: viewOffIcon,
   refresh: refreshIcon,
+  /** 思维导图「复原视图」 */
+  reset: resetIcon,
   unknow: unknowIcon,
   fail: failIcon,
   stop: stopIcon,

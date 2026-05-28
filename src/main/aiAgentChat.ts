@@ -39,6 +39,15 @@ import {
   releaseChatAbortController,
 } from "./aiChat";
 import { runCharacterPortraitExtract } from "./aiCharacterPortrait";
+import { runMindmapTool } from "./aiMindmapTool";
+import {
+  MINDMAP_AFTER_RAG_NUDGE,
+  resolveMindmapInjectHintForTurn,
+  shouldProactiveMindmapNudgeAfterToolRound,
+  shouldRequireMindmapAfterRag,
+} from "@shared/aiMindmapIntent";
+import { inferToolResultOk } from "@shared/aiToolResult";
+import { summarizeToolArgumentsJson } from "@shared/toolArgumentsDisplay";
 import {
   ZERO_TOKEN_USAGE,
   addTokenUsage,
@@ -108,6 +117,8 @@ function buildAgentSystemPrompt(
   chapterMatchSkillRagUnrestricted: boolean,
   /** 本轮以生成章节匹配规则为主：禁止 ragContext */
   chapterMatchRuleOnlyTurn: boolean,
+  /** 本轮用户意图触发的 mindmap 附加说明；null 表示不注入 */
+  mindmapInjectHint: string | null,
 ): string {
   const lines: string[] = [
     "你是资深中文小说阅读助手，正在与用户讨论一部长篇作品。",
@@ -141,6 +152,10 @@ function buildAgentSystemPrompt(
       "- ragContext 对**全章**：优先从阅读器取章节原文（与侧栏字数一致）；原文 ≤1 万字时返回完整 mergedMarkdown；超过 1 万字则按每 1 万字一段压缩为全章提要（约 1 万字，`compressed: true`）。向量索引主要用于 ragSearch。",
       "- 信息已足够时，必须结束工具调用，直接输出最终自然语言答案，不要反复检索同一问题。",
       "- 当用户需要**角色外貌**、全身/衣着描写摘要或 **Stable Diffusion 中文 prompt** 草案（侧栏提交 SD 时会自动译英）时，调用 **extractCharacterAppearance**，参数 `characterName` 为角色名；返回 JSON（含 `excerpts`、`appearance_zh`、`sd_prompt_zh`、`negative_zh`、`confidence_note` 及 `gender`、`age_text`、`identity_zh`、`bio_zh`、`relations_zh` 等）与侧栏「角色」同源。用户开启防剧透时工具结果仅含当前阅读章节及之前的片段。",
+      "## 思维导图（mindmap 工具）",
+      "- 可用 **mindmap** 将章节/全书概括、人物关系、概念结构可视化为导图；须先 **ragSearch** / **ragContext** 再调用；内容概括/人物关系类问题在检索后**必须**调用 mindmap，勿仅用长文代替。",
+      "- **全书概括**（如「概括本书内容」）：以 **ragSearch** 多轮/多关键词为主，勿仅用当前章 ragContext。",
+      "- `markdown` 使用 `#` / `##` / `###` / `-` 层级；**禁止**在回答正文或工具参数中使用 Mermaid `mindmap` 语法。",
       "",
     );
   } else {
@@ -302,6 +317,10 @@ function buildAgentSystemPrompt(
   const extra = configExtra.trim();
   if (extra) {
     lines.push("## 用户在设置中附加的说明", extra, "");
+  }
+
+  if (mindmapInjectHint?.trim()) {
+    lines.push(mindmapInjectHint.trim(), "");
   }
 
   return lines.join("\n");
@@ -916,7 +935,8 @@ async function dispatchTool(
     requestId: ctx.requestId,
     toolCallId: ctx.toolCallId,
     name,
-    argsPreview: previewJson(args, 400),
+    argsPreview: summarizeToolArgumentsJson(argsJson),
+    argsJson: argsJson.trim() || "{}",
   });
 
   try {
@@ -946,7 +966,7 @@ async function dispatchTool(
         requestId: ctx.requestId,
         toolCallId: ctx.toolCallId,
         name,
-        ok: true,
+        ok: inferToolResultOk(full),
         preview,
         full,
       });
@@ -979,6 +999,23 @@ async function dispatchTool(
         toolCallId: ctx.toolCallId,
         name,
         ok: !("error" in result && typeof result.error === "string"),
+        preview,
+        full,
+      });
+      return full;
+    }
+    if (name === "mindmap") {
+      const result = runMindmapTool(args);
+      const full = JSON.stringify(result);
+      const preview = `${result.title}\n${result.markdown.slice(0, 280)}${
+        result.markdown.length > 280 ? "…" : ""
+      }`;
+      ctx.emit({
+        type: "tool_result",
+        requestId: ctx.requestId,
+        toolCallId: ctx.toolCallId,
+        name,
+        ok: true,
         preview,
         full,
       });
@@ -1185,6 +1222,12 @@ export async function runAgentChat(opts: {
       ragEnabled,
       chapterMatchRuleOnlyTurn,
     );
+    const mindmapInjectHint = resolveMindmapInjectHintForTurn({
+      userText: payload.userText,
+      autoMindmapOnSummaryAndCharacters:
+        aiConfig.autoMindmapOnSummaryAndCharacters !== false,
+      chapterMatchRuleOnlyTurn,
+    });
     const systemContent = buildAgentSystemPrompt(
       payload.bookMeta,
       payload.deepThinking,
@@ -1194,6 +1237,7 @@ export async function runAgentChat(opts: {
       ragEnabled,
       chapterMatchSkillRagUnrestricted,
       chapterMatchRuleOnlyTurn,
+      mindmapInjectHint,
     );
 
     const absorbTokenUsage = (part: AITokenUsageTotals | null | undefined) => {
@@ -1226,12 +1270,17 @@ export async function runAgentChat(opts: {
      * 以兼容未实现 tool_choice 的本地推理服务，迫使输出最终自然语言。
      */
     let pendingFinalizeNudge: string | null = null;
+    /** 检索后追问出图（与 finalize 不同：仍保留 tools） */
+    let pendingMindmapNudge: string | null = null;
+    let mindmapAfterRagNudgeUsed = false;
 
     let round = 0;
     while (round < maxRounds) {
       round += 1;
       const finalizeMetaRound = pendingFinalizeNudge;
       pendingFinalizeNudge = null;
+      const mindmapMetaRound = pendingMindmapNudge;
+      pendingMindmapNudge = null;
 
       const messages: unknown[] = [
         { role: "system", content: systemContent },
@@ -1239,6 +1288,8 @@ export async function runAgentChat(opts: {
       ];
       if (finalizeMetaRound) {
         messages.push({ role: "user", content: finalizeMetaRound });
+      } else if (mindmapMetaRound) {
+        messages.push({ role: "user", content: mindmapMetaRound });
       }
 
       const { temperature, extraBody } = resolveAgentDeepThinkingParams({
@@ -1357,6 +1408,7 @@ export async function runAgentChat(opts: {
               toolCallId: tc.id,
               name: tc.function.name,
               argsPreview: "（与上一轮相同，已跳过执行）",
+              argsJson: tc.function.arguments.trim() || "{}",
             });
             raw = dupNotice;
             emit({
@@ -1408,6 +1460,16 @@ export async function runAgentChat(opts: {
         if (isDuplicateToolRound) {
           pendingFinalizeNudge =
             "【系统】上一轮工具请求与之前完全相同，未重复执行检索。请只根据当前对话里已经出现的 tool 消息（含 ragSearch 返回的 chapterIndex、chapterTitle、正文片段等），用简体中文直接回答用户**最后一个问题**。用户可见的章节跳转**只能**写 `（ch=N）`（全角括号），且 **N = chapterIndex（从 0 起）**。不要再次发起工具调用，也不要只写思考过程。";
+        } else if (
+          mindmapInjectHint &&
+          !mindmapAfterRagNudgeUsed &&
+          shouldProactiveMindmapNudgeAfterToolRound(
+            toolCalls.map((tc) => tc.function.name),
+            history,
+          )
+        ) {
+          mindmapAfterRagNudgeUsed = true;
+          pendingMindmapNudge = MINDMAP_AFTER_RAG_NUDGE;
         }
 
         emit({ type: "round_end", requestId });
@@ -1417,6 +1479,19 @@ export async function runAgentChat(opts: {
       let answerText = content ?? "";
       if (finalizeMetaRound && !answerText.trim() && reasoning.trim()) {
         answerText = reasoning.trim();
+      }
+
+      if (
+        !finalizeMetaRound &&
+        mindmapInjectHint &&
+        !mindmapAfterRagNudgeUsed &&
+        answerText.trim() &&
+        shouldRequireMindmapAfterRag(history)
+      ) {
+        mindmapAfterRagNudgeUsed = true;
+        pendingMindmapNudge = MINDMAP_AFTER_RAG_NUDGE;
+        emit({ type: "round_end", requestId });
+        continue;
       }
 
       appendAgentMessageRow({

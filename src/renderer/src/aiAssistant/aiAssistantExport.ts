@@ -87,10 +87,18 @@ export function buildAssistantChatExportMarkdown(
           const t = toolEntryByCallId(m, seg.toolCallId);
           if (!t) continue;
           const body = (t.full || t.preview).trim();
+          const reqJson = (t.argsJson || t.argsPreview).trim();
           lines.push(
             `### 工具：${toolDisplayLabel(t.name, skillToolLabels)}`,
             "",
             t.argsPreview ? `参数摘要：${t.argsPreview}` : "",
+            "",
+          );
+          if (reqJson && reqJson !== t.argsPreview) {
+            lines.push("完整请求：", "", "```json", reqJson, "```", "");
+          }
+          lines.push(
+            "结果：",
             "",
             "```",
             body || "（无正文）",
@@ -174,9 +182,11 @@ export function buildAssistantChatExportJson(
           name: t.name,
           displayName: toolDisplayLabel(t.name, skillToolLabels),
           argsPreview: t.argsPreview,
+          argsJson: t.argsJson,
           preview: t.preview,
           full: t.full,
           status: t.status,
+          ...(t.mindmap ? { mindmap: t.mindmap } : {}),
         })),
       };
     }),

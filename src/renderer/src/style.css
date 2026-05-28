@@ -664,6 +664,46 @@ textarea:focus {
   fill: currentColor;
 }
 
+/**
+ * AI 阅读助手顶栏等同系图标按钮（导出对话、新对话、思维导图工具栏等）
+ */
+.aiActivityLikeBtn {
+  box-sizing: border-box;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  color: var(--tab-fg);
+}
+
+.aiActivityLikeBtn:hover:not(:disabled) {
+  color: var(--tab-fg-hover);
+  background: var(--icon-btn-bg-hover);
+}
+
+.aiActivityLikeBtn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.aiActivityLikeBtn .svg svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.aiActivityLikeBtn .svg svg path {
+  fill: currentColor;
+}
+
 .appShellMenuItemMark {
   flex-shrink: 0;
   width: 3px;
