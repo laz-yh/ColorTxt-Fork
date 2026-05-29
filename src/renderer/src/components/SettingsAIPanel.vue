@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import type { AIConfig } from "@shared/aiTypes";
+import { DEFAULT_AI_QUICK_QUESTIONS, type AIConfig } from "@shared/aiTypes";
+import {
+  DEFAULT_WORDCLOUD_MAX_WORDS,
+  WORDCLOUD_MAX_WORDS_MAX,
+  WORDCLOUD_MAX_WORDS_MIN,
+} from "@shared/aiTypes";
 import {
   CHAT_API_PROVIDER_CUSTOM_ID,
   CHAT_API_PROVIDER_PRESETS,
@@ -148,6 +153,10 @@ function onChatModelPanelOpenChange(isOpen: boolean) {
 
 function addQuickQuestion() {
   modelValue.value.quickQuestions.push("");
+}
+
+function restoreDefaultQuickQuestions() {
+  modelValue.value.quickQuestions = [...DEFAULT_AI_QUICK_QUESTIONS];
 }
 
 function removeQuickQuestion(i: number) {
@@ -430,6 +439,27 @@ async function runChatConnectionTest(): Promise<ConnectionTestResult> {
         </p>
       </section>
 
+      <section class="aiSection aiSection--compact">
+        <div class="settingsRow">
+          <div class="settingsRowMain settingsRowMain--baseline">
+            <span class="settingsLabel"
+              >词云图词项上限（{{ modelValue.wordcloudMaxWords }}）</span
+            >
+            <NumericInput
+              v-model="modelValue.wordcloudMaxWords"
+              :min="WORDCLOUD_MAX_WORDS_MIN"
+              :max="WORDCLOUD_MAX_WORDS_MAX"
+              integer
+              class="numCompact"
+            />
+          </div>
+        </div>
+        <p class="aiMasterHint">
+          词云图最多展示的高频词数量；默认 {{ DEFAULT_WORDCLOUD_MAX_WORDS }}，范围
+          {{ WORDCLOUD_MAX_WORDS_MIN }}～{{ WORDCLOUD_MAX_WORDS_MAX }}。
+        </p>
+      </section>
+
       <section class="aiSection quickQSection">
         <h3 class="aiSectionTitle">快速提问</h3>
         <div
@@ -475,10 +505,19 @@ async function runChatConnectionTest(): Promise<ConnectionTestResult> {
             </button>
           </div>
         </div>
-        <button type="button" class="btn quickQAdd" @click="addQuickQuestion">
-          <span class="iconSvg" v-html="icons.add" />
-          添加一项
-        </button>
+        <div class="quickQActions">
+          <button type="button" class="btn quickQAdd" @click="addQuickQuestion">
+            <span class="iconSvg" v-html="icons.add" />
+            添加一项
+          </button>
+          <button
+            type="button"
+            class="btn quickQRestore"
+            @click="restoreDefaultQuickQuestions"
+          >
+            恢复默认
+          </button>
+        </div>
       </section>
     </template>
   </div>
@@ -740,11 +779,17 @@ async function runChatConnectionTest(): Promise<ConnectionTestResult> {
 }
 
 .quickQAdd {
-  align-self: flex-start;
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+.quickQActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-top: 10px;
+  flex-wrap: wrap;
 }
 
 .quickQAdd .iconSvg :deep(svg) {

@@ -159,6 +159,8 @@ git push
 | `font-list` | 非当前平台的 `libs/{darwin,linux,win32}`；`demo.js`、测试脚本、类型定义、README | `index.js`、`index.mjs`（ESM 入口）、`libs/core.js`、当前平台 `libs/` |
 | `sqlite-vec` | README、`index.d.ts` | `index.cjs` / `index.mjs` |
 | `sqlite-vec-{platform}-{arch}` | README | 原生扩展（如 Windows 的 `vec0.dll`） |
+| `@node-rs/jieba` | README | 词云分词运行时入口 |
+| `@node-rs/jieba-{platform}-{arch}`（非当前平台/架构） | 整包移除 | 当前平台原生扩展（见 `pruneJiebaPlatformPackages`）；打包时 **`asarUnpack`** 保留 jieba 原生 `.node` |
 
 **全 `node_modules` 树**
 
@@ -195,6 +197,11 @@ src/
 │   ├── embedding/            # 内置嵌入 Worker 与本地后端（`localEmbeddingBackend.ts` 等）
 │   ├── aiRagChapterDigest.ts # 超长章分段压缩为全章提要
 │   ├── aiAgentTools.ts       # Agent 工具实现
+│   ├── aiMindmapTool.ts      # mindmap 工具：Markdown 层级校验、节点统计
+│   ├── aiWordcloudTool.ts    # wordcloud 工具：分词统计与语义两阶段筛选
+│   ├── aiWordcloudChapterFetch.ts # 词云：章节正文拉取、抽样与词频合并
+│   ├── aiJieba.ts            # @node-rs/jieba 分词封装
+│   ├── aiSegmentCache.ts     # 按章分词词频缓存（segment.sqlite）
 │   ├── aiCharacterPortrait.ts # 角色抽取、画风与文生图编排
 │   ├── aiTxt2Img.ts          # 文生图路由（A1111 / Comfy / 云端）
 │   ├── aiTxt2ImgPromptAdapt.ts # 画风+形象 → SD tag 或自然语言 prompt
@@ -253,7 +260,9 @@ src/
 │       │   ├── readerPalette.ts  # 阅读器表面色默认值与合并
 │       │   ├── highlightColors.ts # 自定义高亮色默认与解析
 │       │   ├── fileCategories.ts # 文件分类与排序常量
-│       │   └── readerSidebarTab.ts # 侧栏 tab id 常量
+│       │   ├── readerSidebarTab.ts # 侧栏 tab id 常量
+│       │   ├── wordcloudUi.ts      # 词云角度布局模式
+│       │   └── wordcloudPalettes.ts # 词云配色预设
 │       ├── monaco/           # Monaco 阅读器扩展
 │       │   ├── chapterStickyScroll.ts    # 黏性章节大纲
 │       │   ├── readerEditorOptions.ts    # 编辑器选项构建
@@ -304,7 +313,8 @@ src/
 │       │   ├── aiAssistantDbMessages.ts # DB 行与 UI 互转
 │       │   ├── aiAssistantHistoryFormat.ts # 历史快照格式
 │       │   ├── aiAssistantExport.ts     # 对话导出
-│       │   └── parseMindmapToolResult.ts # mindmap 工具 JSON → UI 附件
+│       │   ├── parseMindmapToolResult.ts # mindmap 工具 JSON → UI 附件
+│       │   └── parseWordcloudToolResult.ts # wordcloud 工具 JSON → UI 附件
 │       ├── directives/
 │       │   └── aiStickScroll.ts  # 助手折叠区粘底
 │       ├── services/
@@ -360,7 +370,11 @@ src/
     ├── aiSkills.ts                 # 技能元数据与合并工具
     ├── aiAgentSkillToolNames.ts    # Agent 技能名常量
     ├── aiChapterRefPrompt.ts       # 章节引用提示词约定
-    ├── aiMindmapIntent.ts          # 概括/人物/显式导图意图与 rag 后追问
+    ├── aiMindmapIntent.ts          # 用户原话驱动的导图意图（explicit/auto/none）与 rag 后追问
+    ├── aiWordcloudIntent.ts        # 词云意图检测、mode 判定与 semanticQuery 提炼
+    ├── aiWordcloudSemanticFocus.ts # 语义词云：LLM 抽取 + 按 semanticQuery 筛选 prompt
+    ├── aiWordcloudStopwords.ts     # 词云停用词表
+    ├── aiVisualToolIntent.ts       # 词云与思维导图同轮注入（互斥 / 双工具）
     ├── characterTypes.ts           # 角色侧栏类型
     ├── characterPortraitPaths.ts   # 立绘路径与文件名约定
     ├── chapterMatchBuiltinPatterns.ts # 内置章节正则
@@ -383,7 +397,7 @@ src/
 - **`detectTextEncoding.ts`**：文本文件编码探测，供 `ipcHandlers` 的 `file:stream` 与 `file:readWholeTextFile` 共用；详见下文 **`detectTextEncoding.ts`** 专节。
 - **`dialogInvoke.ts`**：`dialog:showOpenDialog` / `showSaveDialog` 参数解析（与 `@shared/colorTxtOpenSaveDialog` 对齐）。
 - **`messageBoxInvoke.ts`**：`dialog:showMessageBox` 参数解析（与 `@shared/colorTxtShowMessageBox` 对齐）。
-- **`aiPaths.ts`**：**`resolveAiDataCacheRoot`** / **`aiConfigFilePath`** / **`vectorDbFilePath`**（随 **`AIConfig.aiDataCacheDir`**）；**`resolveBuiltinModelCacheRoot`**、**`transformersCacheDirForModelRoot`**（内置模型 HF 缓存）。
+- **`aiPaths.ts`**：**`resolveAiDataCacheRoot`** / **`aiConfigFilePath`** / **`vectorDbFilePath`** / **`segmentDbFilePath`**（随 **`AIConfig.aiDataCacheDir`**）；**`resolveBuiltinModelCacheRoot`**、**`transformersCacheDirForModelRoot`**（内置模型 HF 缓存）。
 - **`aiDataFs.ts`**：**`upgradeLegacyAiDataLayoutIfNeeded`**（旧版 `userData/ai/config.json` + `vector.sqlite*` → **`userData/ai/data/`**）；**`migrateAiDataCacheRoot`** / **`migrateBuiltinModelCacheRoot`**；**`data-cache-root.json`** 引导文件。
 - **`aiConfig.ts`**：在数据缓存根下读写 **`config.json`** 与默认值合并；合并 **`aiDataCacheDir`**、**`embedding.provider`** / **`builtinModel`** 等；API 密钥经 **`secretStorage`** 与磁盘配置分离。
 - **`aiVectorDb.ts`**：SQLite + sqlite-vec：分块、向量、`threads` / `messages` 表及迁移；库文件路径由 **`aiPaths.vectorDbFilePath`** 决定。
@@ -394,7 +408,10 @@ src/
 - **`aiChatThinking.ts`**：按对话 **`baseUrl`** 识别服务商并设置深度思考请求体（如 DeepSeek / 智谱 `thinking`、通义 / Moonshot `enable_thinking`、本机 `think`、OpenRouter `reasoning.effort`、Gemini 兼容 `reasoning_effort`）；**`extractReasoningFromStreamDelta`** 统一解析 `reasoning_content` / `reasoning` / `thinking` / `thought`；工具轮历史是否回传 **`reasoning_content`** 由 **`shouldAttachReasoningContentOnToolCalls`** 判定。
 - **`aiChapterPlainTextBridge.ts`**：主进程 `fetchChapterPlainTextFromRenderer`：经 `ai:chapter-plain-request` / 一次性 `replyChannel` 向渲染层索取与阅读器一致的章节纯文本（超时 20s）。
 - **`aiRagChapterDigest.ts`**：`RAG_CHAPTER_NO_COMPRESS_CHARS`（1 万）内不压缩；超长章按每 1 万字段压缩，合并后 `mergedMarkdown` 上限约 1 万；`chapterDigestProgressUi` 供工具折叠区展示「读取章节原文（M/N）」进度。
-- **`aiAgentTools.ts`**：Agent 可调工具实现（检索章节、向量检索等，与 `@shared/aiAgentSkillToolNames` 等配合）。
+- **`aiAgentTools.ts`**：Agent 可调工具实现（检索章节、向量检索、**`mindmap`** / **`wordcloud`** 等，与 `@shared/aiAgentSkillToolNames` 等配合）。
+- **`aiMindmapTool.ts`**：校验 mindmap 工具参数、统计节点数/深度；Mermaid `mindmap` 语法兜底转 Markdown 层级。
+- **`aiWordcloudTool.ts`** / **`aiWordcloudChapterFetch.ts`**：**`general`** 模式本地 jieba 分词词频；**`semantic`** 模式两阶段（抽样章 LLM 抽取候选词 → 全书计数后 LLM 按 **`semanticQuery`** 筛选）；词数上限取 **`AIConfig.wordcloudMaxWords`**（Agent 传入 **`maxWords`** 亦钳制于此）。
+- **`aiJieba.ts`** / **`aiSegmentCache.ts`**：主进程 **`@node-rs/jieba`** 分词；按 **`bookHash` + chapterIndex** 将词频写入数据缓存根下 **`segment.sqlite`**（内容变更时重建）。
 - **`aiCharacterPortrait.ts`**：角色检索抽取、全书风格推断、中英 SD 提示词、文生图落盘编排；检索与画风推断等 LLM 调用的 usage 汇总为 **`tokenUsage`** / **`tokenUsageAvailable`** 供侧栏展示。
 - **`aiTxt2Img.ts`**：与 A1111 / Comfy / 云端图像 API 交互（采样器列表、实际出图等）。
 - **`aiTxt2ImgTestConnection.ts`**：按 **`backend`** 轻量探测连通性（如 OpenAI `/models`、万相 models、Stability 账户等），**不**调用出图接口。
@@ -415,7 +432,7 @@ src/
 - **阅读器入参**：向 `ReaderMain` 传入阅读偏好与当前主题的 **`highlightColorsLight` / `highlightColorsDark`**（合并默认后）、**`monacoCustomHighlight`**、**`txtrDelimitedMatchCrossLine`**（与内容上色配合的成对符号跨行匹配）、合并后的 **`highlightWordsByIndex`**（global + 本书）及仅本书的 **`highlightWordsByIndexBookOnly`**（选区浮层判定用）。
 - **快捷键与配色**：维护 `shortcutBindings` 并传给 `AppHeader`；**`openColorScheme`** 打开配色弹窗。
 - **侧栏文件列表**：**分类筛选**、**排序模式**、**分类目录**（`fileCategory` / `fileSort` / `fileCategoryCatalog`）与 `FileListPanel`、`useAppPersistence` 联动。
-- **AI 与立绘**：**AI 技能**（`aiSkillsEnabled` / `aiSkillOverrides` / `aiCustomSkills`）、侧栏 **「深度思考」** / **「防剧透」**（`aiAssistantDeepThinking` / `aiAssistantSpoilerSafe`，经 `ReaderSidebar` 绑定 `AiAssistantPanel` 与角色检索抽屉）、**角色立绘缓存目录**（`characterPortraitCacheDir`）等与设置/迁移联动；**`useAiChapterPlainTextBridge`**（`App.vue` 注册）响应主进程 `ragContext` 的章节原文索取。
+- **AI 与立绘**：**AI 技能**（`aiSkillsEnabled` / `aiSkillOverrides` / `aiCustomSkills`）、侧栏 **「深度思考」** / **「防剧透」**（`aiAssistantDeepThinking` / `aiAssistantSpoilerSafe`，经 `ReaderSidebar` 绑定 `AiAssistantPanel` 与角色检索抽屉）、**角色立绘缓存目录**（`characterPortraitCacheDir`）、词云 UI 偏好（**`wordcloudFontFamily`** / **`wordcloudAngleMode`** / **`wordcloudPaletteId`**，经 `AiWordcloudView` 与 `useAppPersistence` 持久化）等与设置/迁移联动；**`useAiChapterPlainTextBridge`**（`App.vue` 注册）响应主进程 `ragContext` 的章节原文索取。
 - **设置弹窗**：由 **`SettingsPanel.vue`** 组织 **`SettingsTabBar`** 与子面板 **`SettingsGeneralPanel`** / **`SettingsReadingPanel`** / **`SettingsEditPanel`** / **`SettingsAIPanel`** / **`SettingsVectorModelPanel`** / **`SettingsTxt2ImgPanel`**（页签文案「角色卡」，文生图与角色卡出图配置）/ **`SettingsSkillsPanel`**；技能编辑用 **`SettingsSkillEditModal.vue`**（见下文组件表）。
 - **全屏与浮层**：全屏时 **`fullscreenFileListPopoversOpen` / `fullscreenAiAssistantPopoversOpen`** 交给 `useAppReaderChrome`，避免 Teleport 浮层打开时误收起全屏侧栏。
 - **根级挂载**：`AppOverlays`、`AppDialogHost`、`AppToastHost` 等。
@@ -721,7 +738,7 @@ src/
 | `SettingsGeneralPanel.vue`                           | 「常规」：启动恢复上次文件、同步当前文件、历史条数、电子书转换缓存目录、章节最少字数、**清除缓存**按钮（向父组件 `clearCache`）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `SettingsReadingPanel.vue`                           | 「阅读」：字号/行高滑块、压缩空行保留一行、引号/括号跨行匹配、Monaco 平滑滚动、全屏正文区宽度。<br>（`monacoCustomHighlight` 来自 props，用于禁用跨行开关提示）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `SettingsEditPanel.vue`                              | 「编辑」：**显示行号**（`readerEditShowLineNumbers`）、**启用小地图**（`readerEditMinimap`）、**自动刷新章节列表**（`editAutoRefreshChapterList`；少于 `editAutoRefreshChapterListMaxLines` 行时编辑变更防抖刷新章节，否则侧栏显示「刷新章节」）                                                                                                                                                                                                                                                                                                                                                                                      |
-| `SettingsAIPanel.vue`                                | 「AI 阅读助手」：总开关；**服务商** + **接口地址**；API Key + **`AppConnectionTestButton`**；模型 / 温度等；Token 开关与单价；**`aiDataCacheDir`**；**`AppPullFlashButton`** 拉取聊天模型；快捷提问列表等 |
+| `SettingsAIPanel.vue`                                | 「AI 阅读助手」：总开关；**服务商** + **接口地址**；API Key + **`AppConnectionTestButton`**；模型 / 温度等；Token 开关与单价；**`aiDataCacheDir`**；**`AppPullFlashButton`** 拉取聊天模型；**生成思维导图**、**词云图词项上限**（`wordcloudMaxWords`）；快速提问列表（含 **恢复默认**） |
 | `ApiEndpointInput.vue`                               | 设置页接口地址输入（可选建议列表；对话页建议列表常为空，以服务商下拉为主）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `AiTokenUsageBanner.vue`                             | 阅读助手 / 角色检索共用的 Token 实际消耗条（`formatTokenUsageActualLine`、可选花费）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `AiIndexProgressBanner.vue`                          | 建索引 / 向量化进度文案（阅读助手建索引与角色 **AI 检索** 前补索引共用）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -1081,7 +1098,7 @@ src/
 - **文生图 / 角色卡**：**「角色卡」** 页配置文生图后端与采样参数（见 `@shared/aiTypes` 的 **`AITxt2ImgConfig`**，默认 **`backend: "a1111"`**、`apiBaseUrl: http://127.0.0.1:7860`）；与主进程 **`aiTxt2Img.ts`**、`registerAiIpc` 暴露的 `ai:txt2img` 等 IPC 配合。服务商与默认地址见下节 **「文生图服务商」**。立绘文件落在 **`characterPortraitCacheDir`**（默认 **`userData/CharacterPortrait`**，按书名分子目录，见 `@shared/characterPortraitPaths`），主进程 **`characterPortraitFs.ts`** 负责迁移与复制。
 - **角色卡 3D 倾斜与闪卡纹理**：侧栏 **「角色」→ 更多 → 卡片效果** 子菜单切换全局纹理（持久化 **`characterCardTextureEffect`**，默认 **细腻光泽**）；详见下节 **「角色卡 3D 倾斜与闪卡纹理」**。实现思路及部分样式、贴图参考 [pokemon-cards-css](https://github.com/simeydotme/pokemon-cards-css)（见 README 致谢）。
 - **技能与 Agent**：内置技能元数据与用户覆盖见 `@shared/aiSkills`；Agent 工具名与主进程 **`aiAgentTools.ts`** 对齐（`@shared/aiAgentSkillToolNames`）。流式对话与工具事件经 **`aiAgentChat.ts`** 推送到渲染层（`window.colorTxt.ai.onAgentEvent`）。
-- **会话与配置**：每本书（内容哈希）多会话，消息存 **同一向量库文件** 内 SQLite 表。运行时 **`config.json`** 位于 **AI 数据缓存根**（**不含**聊天正文；含 **`showTokenUsage`**、**`chat.tokenPricePerMillion`**、**`aiDataCacheDir`**、**`embedding.*`** 等，API Key 不落盘明文）。默认对话 Base URL 为 **`http://127.0.0.1:1234/v1`**（本地 LM Studio）。聊天 / 嵌入 / 文生图请求由主进程代理，经 IPC 流式回传（可中止）。
+- **会话与配置**：每本书（内容哈希）多会话，消息存 **同一向量库文件** 内 SQLite 表。运行时 **`config.json`** 位于 **AI 数据缓存根**（**不含**聊天正文；含 **`showTokenUsage`**、**`chat.tokenPricePerMillion`**、**`aiDataCacheDir`**、**`wordcloudMaxWords`**、**`autoMindmapOnSummaryAndCharacters`**、**`embedding.*`** 等，API Key 不落盘明文）。默认对话 Base URL 为 **`http://127.0.0.1:1234/v1`**（本地 LM Studio）。聊天 / 嵌入 / 文生图请求由主进程代理，经 IPC 流式回传（可中止）。
 
 ### 对话模型服务商
 
@@ -1211,7 +1228,7 @@ cardShellWrap（悬停抬高 z-index）
 #### AI 数据缓存目录（`aiDataCacheDir`）
 
 - **设置位置**：**设置 → AI 阅读助手 → 数据缓存目录**（**`AIConfig.aiDataCacheDir`**，空串表示默认 **`{userData}/ai/data`**）。
-- **目录内容**：**`config.json`**（AI 各子项配置，不含 API Key 明文）、**`vector.sqlite`**（及 WAL/SHM，含分块向量、按书的 Agent 会话与消息）、引导文件 **`userData/ai/data-cache-root.json`** 记录当前生效根路径。
+- **目录内容**：**`config.json`**（AI 各子项配置，不含 API Key 明文）、**`vector.sqlite`**（及 WAL/SHM，含分块向量、按书的 Agent 会话与消息）、**`segment.sqlite`**（及 WAL/SHM，词云按章分词词频缓存）、引导文件 **`userData/ai/data-cache-root.json`** 记录当前生效根路径。
 - **旧版升级**：首次启动时若仍存在 **`userData/ai/config.json`** 或旧 **`vector.sqlite`**，主进程 **`upgradeLegacyAiDataLayoutIfNeeded`** 自动迁入 **`ai/data`** 并写 bootstrap。
 - **变更目录**：设置里修改数据缓存目录并 **确定** 时，**`SettingsPanel`** 提示确认后调用 **`window.colorTxt.ai.migrateDataCacheRoot`**（关闭向量库连接后合并迁移 `config.json` 与 `vector.sqlite*`）。
 
@@ -1251,21 +1268,48 @@ cardShellWrap（悬停抬高 z-index）
 
 ### 思维导图（`mindmap` 工具）
 
-阅读助手在概括剧情、了解人物关系或用户明确要求可视化时，可由 Agent 调用 **`mindmap`** 工具，在对话中嵌入 **markmap** 导图（非 Mermaid 正文图）。UI 由 **`AiMindmapView.vue`** 承载，数据经 **`parseMindmapToolResult.ts`** 挂到工具行。
+阅读助手在用户明确要求可视化，或开启自动导图且问题适合层级展示时，可由 Agent 调用 **`mindmap`** 工具，在对话中嵌入 **markmap** 导图（非 Mermaid 正文图）。UI 由 **`AiMindmapView.vue`** 承载，数据经 **`parseMindmapToolResult.ts`** 挂到工具行。
 
 | 项 | 说明 |
 | ---- | ---- |
 | 工具参数 | `reasoning`、`title`、`markdown`（`#` / `##` / `###` / `-` 层级；禁止 Mermaid `mindmap` 语法） |
 | 数据流 | 须先 **`ragSearch` / `ragContext`**；全书概括（如快速提问「概括本书内容」）以 **`ragSearch`** 跨章为主；本章问题仍优先 **`ragContext(当前章)`** |
 | 侧栏预览 | 工具折叠下方缩略图（`preview` 默认）：**仅展示**（`pointer-events: none`），不可拖拽；标题行与 **`AiAssistantDetailsFold`** 对齐（`icons.mindmap`）；点击预览区打开全屏；视口高度随侧栏宽度与内容约 **160–420px** 自适应；侧栏/导图 resize 时 markmap **300ms** 过渡；预览区文字不可选中 |
-| 全屏大图 | `Teleport` 弹层：视口固定边距 **`padding: 6vh 4vw`**（随窗口放大，**无** 960×720 上限）；开/关 **Transition**（与 **`AppModal`** 同系淡入 + 面板缩放）；**复原**（`icons.reset`）、**导出 SVG**、**关闭**（全局 **`aiActivityLikeBtn`**，关闭钮 danger hover）；底部一行左 **节点数/深度**、右操作说明；**滚轮缩放**（`scrollForPan: false`）；Esc/遮罩关闭后 **`blur`** 预览区，避免侧栏残留聚焦蓝框 |
+| 全屏大图 | `Teleport` 弹层：视口固定边距 **`padding: 6vh 4vw`**（随窗口放大，**无** 960×720 上限）；开/关 **Transition**（与 **`AppModal`** 同系淡入 + 面板缩放）；工具栏 **复原**（`icons.reset`）\|**全部收起**（`icons.fold`）\|**全部展开**（`icons.expand`）\|**导出 SVG**（`icons.download`）\|**关闭**（全局 **`aiActivityLikeBtn`**，关闭钮 danger hover）；底部一行左 **节点数/深度**、右操作说明；**滚轮缩放**（`scrollForPan: false`）；Esc/遮罩关闭后 **`blur`** 预览区，避免侧栏残留聚焦蓝框 |
+| 节点交互 | **`toggleRecursively: false`**：单击节点仅切换该节点折叠状态；**全部收起**后点根节点不会递归展开整树（子节点保持原 fold 状态）。**Ctrl/Cmd+点击** 仍可递归展开/收起 |
+| 导出 SVG | **`renderFullyExpandedExportSvg()`** 离屏渲染**全展开**导图后导出，与当前视图折叠状态无关 |
 | 章节标记 | 展示前经 **`aiMarkdownChapterRef`**：`（ch=N）` 等替换为当前书 **章节标题**（`AiAssistantChatMessages` 传入 `chapters`）；持久化 JSON 仍为模型原始 markdown。与助手正文共用归一化（`（ch=a-b）`、序号后说明外移等），见 **`aiChapterRefPrompt`** |
 | 持久化 | 工具结果 JSON 写入 SQLite **`messages`**（`role=tool`，`tool_name=mindmap`）；重开会话由 **`aiAssistantDbMessages`** 还原 |
 | 自动出图 | **设置 → AI 阅读助手 →「生成思维导图」**（`AIConfig.autoMindmapOnSummaryAndCharacters`，默认开启）。关闭后仅在用户提到「思维导图」「导图」等时注入出图提示；**不**写死全部快速提问 |
-| 默认快速提问 | `这章讲了什么`、`本书的主角与重要配角都有谁`、`概括本书内容`（`DEFAULT_AI_QUICK_QUESTIONS`，仅配置缺省/空列表时回退） |
+| 意图判定 | **`@shared/aiMindmapIntent`**：`explicit`（用户显式要导图）/ `auto`（开放型结构化问题，由用户原话驱动）/ `none`；定位章节、单点事实查询等排除自动导图 |
+| 与词云互斥 | **`@shared/aiVisualToolIntent`**：同轮若同时检测到词云与导图意图，默认**优先词云**；仅当用户原话显式同时要两者（如同时出现「词云」与「思维导图/关系图」）才双工具注入 |
+| 默认快速提问 | `这章讲了什么`、`生成人物关系图`、`生成角色词云`、`概括本书内容`（`DEFAULT_AI_QUICK_QUESTIONS`；设置页 **恢复默认** 或配置缺省/空列表时回退） |
 | 依赖 | **`markmap-lib`** / **`markmap-view`** 为 devDependencies，打进 renderer bundle（与 `marked` 类似，非整包 `node_modules` 外链） |
 
 意图与 rag 后追问：**`@shared/aiMindmapIntent`**；主进程转换与统计：**`aiMindmapTool.ts`**（含 Mermaid `mindmap` 语法兜底转 Markdown 层级）。
+
+### 词云图（`wordcloud` 工具）
+
+阅读助手在用户提到「词云」或相关表述时，可由 Agent 调用 **`wordcloud`** 工具生成交互式词云（**d3-cloud** + Canvas）。UI 由 **`AiWordcloudView.vue`** 承载，数据经 **`parseWordcloudToolResult.ts`** 挂到工具行。**不依赖向量索引**，词频由主进程本地分词统计。
+
+| 项 | 说明 |
+| ---- | ---- |
+| 工具参数 | `reasoning`、`title`、`mode`（`general` \| `semantic`）、`semanticQuery`（semantic 必填，贴近用户原话）、`scope`（`full` \| `chapter`）、`chapterIndex`、`maxWords`（未指定时用设置 **`wordcloudMaxWords`**，默认 **80**，范围 **10–200**） |
+| **general** | 全书或单章高频词：`@node-rs/jieba` 分词 + 停用词过滤；按章词频合并后取 Top N |
+| **semantic** | 两阶段：① 抽样章节 LLM **抽取**候选词项；② 全书计数后 LLM 按 **`semanticQuery`** **筛选**相关词（无预设语义类别，由用户原话驱动，如「武功招式」「角色名」等） |
+| 分词缓存 | 数据缓存根下 **`segment.sqlite`**（`aiSegmentCache.ts`）：按 **`bookHash` + chapterIndex** 缓存章级词频；章节正文变更时重建 |
+| 防剧透 | 与阅读助手共用 **`spoilerSafe`**：统计章节范围不超过当前阅读章节 |
+| 进度 | 工具折叠区展示阶段标题（构建分词缓存、语义抽取/筛选等） |
+| 侧栏预览 | 与思维导图类似：缩略 Canvas、点击打开全屏；标题行 **`icons.wordcloud`** |
+| 全屏交互 | **字体**（`FontPicker`，独立于阅读器字体）、**角度布局**（水平/垂直/混合，`wordcloudAngleMode`）、**配色**（`wordcloudPalettes`）、**重新生成**（递增 **`layoutSeed`** 换布局）、**导出 PNG**；拖动平移、滚轮缩放 |
+| 布局 seed | 每条词云独立 **`layoutSeed`**，写入 tool 消息 JSON；**重新生成**后经 **`ai:messageUpdateToolContent`** IPC 持久化，重开会话布局不变 |
+| 统计行 | 左下角：**语义：xxx，词项：xxx**（general 模式仅显示词项数） |
+| 词项上限 | **设置 → AI 阅读助手 → 词云图词项上限**（`AIConfig.wordcloudMaxWords`）；主进程 **`aiWordcloudTool`** 与 Agent 参数 **`maxWords`** 均钳制于此 |
+| UI 偏好持久化 | **`colorTxt.ui.settings`**：**`wordcloudFontFamily`**、**`wordcloudAngleMode`**、**`wordcloudPaletteId`**（全局，非按会话） |
+| 意图 | **`@shared/aiWordcloudIntent`**：检测词云意图、`general`/`semantic` 模式、从用户原话提炼 **`semanticQuery`**；与思维导图同轮互斥见 **`aiVisualToolIntent`** |
+| 持久化 | 工具结果 JSON 写入 SQLite **`messages`**（`role=tool`，`tool_name=wordcloud`）；重开会话由 **`aiAssistantDbMessages`** 还原 |
+
+主进程实现：**`aiWordcloudTool.ts`**、**`aiWordcloudChapterFetch.ts`**、**`aiJieba.ts`**、**`aiSegmentCache.ts`**；语义 prompt：**`@shared/aiWordcloudSemanticFocus`**；停用词：**`@shared/aiWordcloudStopwords`**。打包时 **`@node-rs/jieba`** 原生扩展经 **`asarUnpack`** 解出，**`prune-pack-deps`** 仅保留当前平台 **`jieba-*`** 包。
 
 ### Token 用量
 
@@ -1282,7 +1326,7 @@ cardShellWrap（悬停抬高 z-index）
 
 | 路径 / 目录 | 说明 |
 | ----------- | ---- |
-| `ai/data/`（默认数据缓存根） | **`config.json`**、**`vector.sqlite`**（+ WAL/SHM）；实际根目录取 **`aiDataCacheDir`** 或 **`data-cache-root.json`** |
+| `ai/data/`（默认数据缓存根） | **`config.json`**、**`vector.sqlite`**（+ WAL/SHM）、**`segment.sqlite`**（+ WAL/SHM，词云分词缓存）；实际根目录取 **`aiDataCacheDir`** 或 **`data-cache-root.json`** |
 | `ai/data-cache-root.json` | 记录当前生效的 AI 数据缓存绝对路径（`aiDataFs`） |
 | `ai/model-cache/`（默认内置模型缓存根） | 内置 Transformers 权重；其下 **`transformers-cache/`**；实际根目录取 **`embedding.builtinModelCacheDir`** |
 | `ai/config.json`、`ai/vector.sqlite`（旧版） | 仅迁移前遗留；启动时尽量迁入 **`ai/data/`** |
@@ -1290,7 +1334,7 @@ cardShellWrap（悬停抬高 z-index）
 
 ### `localStorage` 与 `file.meta` 中的 AI 相关键
 
-- **`colorTxt.ui.settings`**：**`aiSkillsEnabled`**、**`aiSkillOverrides`**、**`aiCustomSkills`**、**`aiAssistantDeepThinking`**、**`aiAssistantSpoilerSafe`**；**`characterPortraitCacheDir`**（空串表示使用默认 `userData/CharacterPortrait`）；**`characterCardTextureEffect`**（角色卡闪卡纹理 id，默认 **`soft`**，见 **「角色卡 3D 倾斜与闪卡纹理」**）。其余界面与阅读字段仍见「数据存储说明」中的 `PersistedSettingsData` / `cacheStore.ts`。
+- **`colorTxt.ui.settings`**：**`aiSkillsEnabled`**、**`aiSkillOverrides`**、**`aiCustomSkills`**、**`aiAssistantDeepThinking`**、**`aiAssistantSpoilerSafe`**；**`characterPortraitCacheDir`**（空串表示使用默认 `userData/CharacterPortrait`）；**`characterCardTextureEffect`**（角色卡闪卡纹理 id，默认 **`soft`**，见 **「角色卡 3D 倾斜与闪卡纹理」**）；**`wordcloudFontFamily`**、**`wordcloudAngleMode`**、**`wordcloudPaletteId`**（词云全屏 UI 偏好，见 **「词云图」**）。其余界面与阅读字段仍见「数据存储说明」中的 `PersistedSettingsData` / `cacheStore.ts`。
 - **`colorTxt.file.meta`**：**`characterRoster`**、**`characterBookStyle`**（类型见 `@shared/characterTypes`），与书签、阅读进度、电子书转换路径等字段并列，详见 `FileMetaRecord` / `fileMetaStore.ts`。
 
 ### 主要 Vue 组件（AI / 角色与相关设置）
@@ -1302,8 +1346,9 @@ cardShellWrap（悬停抬高 z-index）
 | `ReaderSidebar.vue` | 侧栏容器：活动栏含 **AI 助手**、**角色** 等（`constants/readerSidebarTab.ts`）。<br>挂载 **`AiAssistantPanel`**、**`CharacterSidebarPanel`** 等；**角色 → 更多 → 卡片效果** 子菜单（`CHARACTER_CARD_TEXTURE_EFFECTS`、分隔线、`AppShellMenuTeleport`）；`v-model:character-card-texture-effect` 与 `App.vue` 同步 |
 | `SettingsPanel.vue` | 设置壳层：确定时校验向量维度、**数据/模型缓存目录迁移**、`configSet` 与 `emit('apply')`；「清除缓存」见数据存储章 |
 | `SettingsTabBar.vue` | 页签含 `ai` / `vectorModel` / `txt2img` / `skills`。<br>`showAiExtensionTabs` 为 false 时隐藏向量模型 / 角色卡 / 技能扩展页签 |
-| `SettingsAIPanel.vue` | 「AI 阅读助手」：总开关；服务商 + 地址；API Key + **测试连接**；模型 / 温度；Token 与 **`aiDataCacheDir`**；**概括与人物类自动思维导图**；快速提问列表 |
-| `AiMindmapView.vue` | 阅读助手思维导图：侧栏预览 + 全屏交互（markmap）；章节标题替换、SVG 导出 |
+| `SettingsAIPanel.vue` | 「AI 阅读助手」：总开关；服务商 + 地址；API Key + **测试连接**；模型 / 温度；Token 与 **`aiDataCacheDir`**；**生成思维导图**、**词云图词项上限**；快速提问列表（**恢复默认**） |
+| `AiMindmapView.vue` | 阅读助手思维导图：侧栏预览 + 全屏交互（markmap）；全部收起/展开、章节标题替换、**全展开** SVG 导出 |
+| `AiWordcloudView.vue` | 阅读助手词云：侧栏预览 + 全屏 Canvas（d3-cloud）；字体/角度/配色、重新生成（`layoutSeed`）、PNG 导出 |
 | `ApiEndpointInput.vue` | 接口地址手填输入框 |
 | `AiTokenUsageBanner.vue` | Token 消耗与花费展示条（阅读助手、角色检索共用） |
 | `AiIndexProgressBanner.vue` | 向量建索引进度条（阅读助手建索引、角色检索前补索引） |
@@ -1315,7 +1360,7 @@ cardShellWrap（悬停抬高 z-index）
 | `AppPullFlashButton.vue` | 设置面板内刷新模型/采样器列表等，完成态闪光反馈 |
 | `PathPickerInput.vue` | 目录选择（含 **角色立绘缓存根目录** 等） |
 | `AiAssistantPanel.vue` | 侧栏 AI 阅读助手主面板：会话、输入、`onAgentEvent`（流式增量、工具、`token_usage_*`、`done`/`error`）；历史列表会话名 **`title`** 悬停提示；**`findLiveAgentAssistant`**；受 **`showTokenUsage`** 控制 Token 条 |
-| `AiAssistantChatMessages.vue` | 消息列表：用户/助手气泡、思考块、工具折叠、**`AiMindmapView`**（传入 `chapters`）；**`AiMarkdown`** 章节跳转；**`AiTokenUsageBanner`** |
+| `AiAssistantChatMessages.vue` | 消息列表：用户/助手气泡、思考块、工具折叠、**`AiMindmapView`** / **`AiWordcloudView`**（传入 `chapters`）；**`AiMarkdown`** 章节跳转；**`AiTokenUsageBanner`** |
 | `AiAssistantDetailsFold.vue` | 助手详情折叠（与 `directives/aiStickScroll`、`useAiFoldContentSelectAll` 配合） |
 | `AiToolFoldBody.vue` | 工具折叠正文；超长章压缩进度中 **`当前进度：M/N`** 高亮（`utils/aiToolFoldBody.ts`） |
 | `AiMarkdown.vue` | 助手回复 Markdown（`aiMarkdownMarkedSetup` / `Prep`、`aiMarkdownChapterRef`） |
@@ -1325,7 +1370,7 @@ cardShellWrap（悬停抬高 z-index）
 
 ### 源码与 IPC 速查
 
-主进程 **`registerAiIpc.ts`** 集中注册 `ai:*` IPC（含 **`ai:embedding:builtin:*`** 列表/状态/下载/清缓存、**`ai:migrateDataCacheRoot`** / **`ai:migrateBuiltinModelCacheRoot`**）；**`aiPaths.ts`**、**`aiDataFs.ts`**、**`aiConfig.ts`**、**`aiVectorDb.ts`**、**`aiEmbedding.ts`**、**`embedding/*`**、**`aiChat.ts`**、**`aiAgentChat.ts`**、**`aiChatThinking.ts`** 等见 **「开发」** 目录树与 **「内置向量模型与缓存目录」**；渲染侧 **`ai/buildBookVectorIndex.ts`**、**`ai/embeddingReady.ts`**、**`shared/builtinEmbeddingModels.ts`**。预加载 **`window.colorTxt.ai.*`**（含 **`embeddingBuiltinLoad`**、**`migrateDataCacheRoot`** 等）见 **「`src/preload/index.ts`（预加载）」**。
+主进程 **`registerAiIpc.ts`** 集中注册 `ai:*` IPC（含 **`ai:embedding:builtin:*`** 列表/状态/下载/清缓存、**`ai:migrateDataCacheRoot`** / **`ai:migrateBuiltinModelCacheRoot`**、**`ai:messageUpdateToolContent`** 更新已落库 tool 消息如词云 **`layoutSeed`**）；**`aiPaths.ts`**、**`aiDataFs.ts`**、**`aiConfig.ts`**、**`aiVectorDb.ts`**、**`aiEmbedding.ts`**、**`embedding/*`**、**`aiChat.ts`**、**`aiAgentChat.ts`**、**`aiChatThinking.ts`**、**`aiMindmapTool.ts`**、**`aiWordcloudTool.ts`** / **`aiSegmentCache.ts`** 等见 **「开发」** 目录树与 **「内置向量模型与缓存目录」** / **「思维导图」** / **「词云图」**；渲染侧 **`ai/buildBookVectorIndex.ts`**、**`ai/embeddingReady.ts`**、**`shared/builtinEmbeddingModels.ts`**。预加载 **`window.colorTxt.ai.*`**（含 **`embeddingBuiltinLoad`**、**`migrateDataCacheRoot`**、**`messageUpdateToolContent`** 等）见 **「`src/preload/index.ts`（预加载）」**。
 
 角色卡倾斜/放大/纹理（无独立 IPC）：**`@shared/characterCardTextureEffects`**、**`composables/useCharacterCardTilt.ts`**、**`composables/useCharacterCardPopoverZoom.ts`**、**`utils/characterCardSpring.ts`**、**`styles/characterCardHolo*.css`**、**`components/CharacterRosterCard.vue`**；见 **「角色卡 3D 倾斜与闪卡纹理」**。
 
@@ -1387,7 +1432,7 @@ cardShellWrap（悬停抬高 z-index）
 
 ### 「重置当前页」与历史上的全量恢复默认
 
-- **当前 UI**：设置弹窗 footer **「重置当前页」** 仅将**当前 tab** 内的草稿恢复为代码中的默认值（如常规页恢复启动选项/电子书目录/章节字数等；阅读页恢复字号行高/平滑滚动等；**AI 阅读助手** 页另重置 **`tokenPricePerMillion`**、**`showTokenUsage`**、**`aiDataCacheDir`** 默认路径等，见 `SettingsPanel.resetAiDraft`；**向量模型** 页见 `resetVectorModelDraft`，恢复内置/远程默认与 **`builtinModelCacheDir`**），**不会自动落盘**——仍需点 **「确定」** 才会 `emit('apply')` 并持久化（AI 部分另走 `window.colorTxt.ai.configSet`）。
+- **当前 UI**：设置弹窗 footer **「重置当前页」** 仅将**当前 tab** 内的草稿恢复为代码中的默认值（如常规页恢复启动选项/电子书目录/章节字数等；阅读页恢复字号行高/平滑滚动等；**AI 阅读助手** 页另重置 **`tokenPricePerMillion`**、**`showTokenUsage`**、**`aiDataCacheDir`** 默认路径、**`wordcloudMaxWords`** 等，见 `SettingsPanel.resetAiDraft`；**向量模型** 页见 `resetVectorModelDraft`，恢复内置/远程默认与 **`builtinModelCacheDir`**），**不会自动落盘**——仍需点 **「确定」** 才会 `emit('apply')` 并持久化（AI 部分另走 `window.colorTxt.ai.configSet`）。
 - **`skipSettingsPersistenceSessionKey`**：`useAppPersistence` 仍保留该 `sessionStorage` 门闩：若将来或脚本在**删除** `colorTxt.ui.settings` 后立刻刷新，应在刷新前写入该键为 `"1"`，否则 `beforeunload` 里的 **`persistSettings()`** 会把内存中的旧 UI 设置写回，抵消删除操作。`initPersistenceBootstrap()` 启动时会清除该键与 `skipUnloadPersistenceSessionKey`。
 
 ### 主进程用户数据目录
