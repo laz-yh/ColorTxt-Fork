@@ -625,7 +625,8 @@ src/
 - 组装主进程能力：`createMainWindowFactory`（窗口创建）、`registerMainIpcHandlers`（业务 IPC）、`setupLaunchTxtHandlers`（启动 txt / 单实例）。
 - `app.whenReady()` 后调用 `setupAutoUpdater()`，并根据启动参数 / macOS `open-file` 队列决定首个窗口是否直接打开某个 `.txt`；并调用 `registerGlobalShortcuts()`（见 `globalShortcuts.ts`）。
 - `will-quit` 时调用 `unregisterGlobalShortcuts()`，避免进程退出后仍占用系统快捷键表。
-- `activate` / `window-all-closed` 等生命周期钩子（非 macOS 全关窗口退出）。
+- `activate`：macOS 点击 Dock 图标且无窗口时重建主窗口。
+- `window-all-closed`：全部窗口关闭后 `markAppQuittingForClose()` 并 `app.quit()`（含 macOS）；配合 `windowCloseGuard` 避免 Cmd+Q / 菜单退出时关窗拦截导致进程残留。
 
 **`globalShortcuts.ts`**
 
