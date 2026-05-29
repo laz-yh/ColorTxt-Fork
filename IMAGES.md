@@ -28,15 +28,19 @@
 
 <img src="./images/AI阅读助手_剧情分析.jpg" width="600">
 
-<img src="./images/AI阅读助手_生成章节匹配规则.jpg" width="600">
+<img src="./images/AI阅读助手_匹配规则.jpg" width="600">
+
+<img src="./images/AI阅读助手_思维导图.jpg" width="600">
+
+<img src="./images/AI阅读助手_词云图.jpg" width="600">
 
 ### 角色卡
 
-<img src="./images/角色卡_正反面.jpg" width="600">
+<img src="./images/角色卡.jpg" width="600">
 
 <img src="./images/角色卡_AI检索.jpg" width="600">
 
-<img src="./images/角色卡_角色立绘生成.jpg" width="600">
+<img src="./images/角色卡_立绘生成.jpg" width="600">
 
 ### 语音朗读
 
