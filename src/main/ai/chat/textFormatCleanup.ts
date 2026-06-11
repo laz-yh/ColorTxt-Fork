@@ -49,6 +49,16 @@ function buildRemovePromotionalSection(enabled: boolean): string[] {
   ];
 }
 
+function buildMergeHardWrapSection(enabled: boolean): string[] {
+  if (!enabled) return [];
+  return [
+    "【硬换行合并】",
+    "将同一自然段内因排版产生的句中强行换行合并为一行（中文相邻行之间不加空格）。保留章节/ATX 标题行本身、诗歌/歌词、列表、作者刻意单独成行的短句。",
+    "`# 作者简介`、`# 内容简介` 等标题**下一行起**，若为连贯叙述（非诗歌、非逐条列表），**仍须**合并句中硬换行。",
+    "「保持原样」仅指站点转载头、作品信息卡（书名/作者/状态等字段堆砌），**不**适用于标题下的正文段落；勿因标题含「简介」「作者」等字样而跳过合并。",
+  ];
+}
+
 function buildDialogueQuoteUnifySection(
   mode: AiSmartFormatUnifyDialogueQuotes,
 ): string[] {
@@ -66,8 +76,18 @@ function buildDialogueQuoteUnifySection(
     `仅对**真正的角色对白**统一引号为 ${style}；与目标不一致的「」、『』、“” 等须替换。`,
     example,
     "**禁止**对非对白文本改引号，包括但不限于：书名/作者/状态/简介等元信息块（如整段『书名…/作者：…』『内容简介：…』）、章节标题、旁白叙述、标注/说明性括注、书名号《》内标题。",
-    "若一行或一段是站点转载头、作品信息卡、版权说明等（常由成对『』或「」整体包裹且内含「作者」「简介」「更新到」等字段），**整段保持原样**，勿把外层括号当作对白引号替换。",
+    "若一行或一段是站点转载头、作品信息卡、版权说明等（常由成对『』或「」整体包裹且内含「作者」「简介」「更新到」等字段），勿把外层括号当作对白引号替换；**仅指引号**，不禁止硬换行合并标题下的连贯叙述。",
     "不确定某处是否为角色开口说话时，**保持原引号不变**；勿改英文对白里的半角引号。",
+  ];
+}
+
+function buildPreserveHtmlStructureSection(preserveHtml: boolean): string[] {
+  if (!preserveHtml) return [];
+  return [
+    "【保留 HTML 结构】",
+    "用户已关闭「清理 HTML 残留」：正文中的 HTML 标签与节点须**原样保留**（如 `<span id=\"…\">`、`<br>`、`<div>` 等），不得删除、合并、改写 tag 名或属性，不得把仅含 HTML 的行当作空行去掉。",
+    "Markdown 语法（`![](…)`、`[文字](#fragment)` 等）须一并保留。",
+    "与其它已启用子任务冲突时，以保留 HTML/Markdown 结构为准。",
   ];
 }
 
@@ -80,6 +100,8 @@ function buildSmartFormatSystemPrompt(
     removePiracyWatermarks: boolean;
     restoreGarbledChars: boolean;
     restoreAsteriskMasks: boolean;
+    /** false 表示用户关闭「清理 HTML 残留」，须向模型强调保留 HTML */
+    cleanHtmlRemnants: boolean;
   },
   skillPrompt: string,
 ): string {
@@ -137,6 +159,8 @@ function buildSmartFormatSystemPrompt(
     "",
     ...scope,
     "",
+    ...buildMergeHardWrapSection(opts.mergeHardWrap),
+    ...(opts.mergeHardWrap ? [""] : []),
     ...buildDialogueQuoteUnifySection(opts.unifyDialogueQuotes),
     ...(opts.unifyDialogueQuotes !== "none" ? [""] : []),
     ...buildRemovePromotionalSection(opts.removePromotionalContent),
@@ -145,6 +169,8 @@ function buildSmartFormatSystemPrompt(
     ...(opts.removePiracyWatermarks ? [""] : []),
     ...buildRestoreAsteriskSection(opts.restoreAsteriskMasks),
     ...(opts.restoreAsteriskMasks ? [""] : []),
+    ...buildPreserveHtmlStructureSection(!opts.cleanHtmlRemnants),
+    ...(!opts.cleanHtmlRemnants ? [""] : []),
     "【硬性约束（本次）】",
     ...constraints,
   ]
@@ -224,6 +250,7 @@ export async function runSmartFormatCleanupSegment(opts: {
       removePiracyWatermarks: payload.removePiracyWatermarks,
       restoreGarbledChars: payload.restoreGarbledChars,
       restoreAsteriskMasks: payload.restoreAsteriskMasks,
+      cleanHtmlRemnants: payload.cleanHtmlRemnants !== false,
     },
     skillPrompt,
   );

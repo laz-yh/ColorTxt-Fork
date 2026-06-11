@@ -112,6 +112,7 @@ export function useAiSmartFormat(deps: {
         chapterMinCharCount: 0,
         isMarkdown: false,
         preserveMarkdownSourceLines: false,
+        preservePhysicalSourceLines: false,
       }
     );
   }
@@ -264,6 +265,7 @@ export function useAiSmartFormat(deps: {
         removePiracyWatermarks: settings.removePiracyWatermarks,
         restoreGarbledChars: settings.restoreGarbledChars,
         restoreAsteriskMasks: settings.restoreAsteriskMasks,
+        cleanHtmlRemnants: settings.cleanHtmlRemnants,
         skillPrompt: resolveSmartFormatSkillPrompt(deps.aiSkillOverrides.value),
       });
       if (abortAc?.signal.aborted) {

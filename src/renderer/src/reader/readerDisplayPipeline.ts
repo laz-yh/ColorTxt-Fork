@@ -42,6 +42,11 @@ export type ReaderDisplayFormatOptions = {
    * 只读展示仍为去掉 `#` 的标题正文。
    */
   preserveMarkdownSourceLines?: boolean;
+  /**
+   * 编辑态写回磁盘：按物理行原文处理（保留 `<span id>` 等），
+   * 不走只读展示用的 span 剥离与 MD 侧车。
+   */
+  preservePhysicalSourceLines?: boolean;
 };
 
 export type ReaderDisplayFormatResult = {
@@ -72,6 +77,25 @@ function shouldOmitMdAnchorMetadataDisplayLine(
     isBlankPhysicalLineContent(strippedLine) &&
     isMdAnchorMetadataOnlyPhysicalLine(rawLine)
   );
+}
+
+/** 编辑态写回：保留物理行原文，不调用 {@link visibleReaderLineFromPhysicalRaw} */
+function lineContentForPhysicalWriteBack(
+  rawLine: string,
+  strippedLine: string,
+  mdStrip: StripMdInternalLinksResult | null | undefined,
+  preservePhysicalSource: boolean,
+): string {
+  if (preservePhysicalSource) return rawLine;
+  return mdStrip ? strippedLine : visibleReaderLineFromPhysicalRaw(rawLine);
+}
+
+function blankCheckLineForFormat(
+  rawLine: string,
+  strippedLine: string,
+  preservePhysicalSource: boolean,
+): string {
+  return preservePhysicalSource ? rawLine : strippedLine;
 }
 
 function isEbookFalseChapterTitleFromLeadingLink(
@@ -302,8 +326,11 @@ export function formatPhysicalLinesForReader(
   preStrip?: StripMdInternalLinksResult,
 ): ReaderDisplayFormatResult {
   const minCharCount = options.minCharCount ?? 0;
+  /** 编辑态写回：按物理行原文压缩/缩进，不走只读 MD 侧车剥离（避免 `<span id>` 等被删） */
+  const preservePhysicalSource = options.preservePhysicalSourceLines === true;
   const hasMdLinks =
     options.isMarkdown &&
+    !preservePhysicalSource &&
     (preStrip != null ||
       physicalLines.some(
         (line) =>
@@ -350,13 +377,17 @@ export function formatPhysicalLinesForReader(
       physicalLine += 1;
       const strippedLine = contentLines[physicalLine - 1] ?? rawLine;
       if (
+        !preservePhysicalSource &&
         shouldOmitMdAnchorMetadataDisplayLine(mdStrip, rawLine, strippedLine)
       ) {
         continue;
       }
-      const visibleLine = mdStrip
-        ? strippedLine
-        : visibleReaderLineFromPhysicalRaw(rawLine);
+      const visibleLine = lineContentForPhysicalWriteBack(
+        rawLine,
+        strippedLine,
+        mdStrip,
+        preservePhysicalSource,
+      );
       const { shown } = resolvePhysicalLineDisplay(
         visibleLine,
         physicalLine,
@@ -433,14 +464,24 @@ export function formatPhysicalLinesForReader(
     physicalLine += 1;
     const strippedLine = contentLines[physicalLine - 1] ?? rawLine;
     if (
+      !preservePhysicalSource &&
       shouldOmitMdAnchorMetadataDisplayLine(mdStrip, rawLine, strippedLine)
     ) {
       continue;
     }
-    if (isBlankPhysicalLineContent(strippedLine)) continue;
-    const visibleLine = mdStrip
-      ? strippedLine
-      : visibleReaderLineFromPhysicalRaw(rawLine);
+    if (
+      isBlankPhysicalLineContent(
+        blankCheckLineForFormat(rawLine, strippedLine, preservePhysicalSource),
+      )
+    ) {
+      continue;
+    }
+    const visibleLine = lineContentForPhysicalWriteBack(
+      rawLine,
+      strippedLine,
+      mdStrip,
+      preservePhysicalSource,
+    );
     const { shown } = resolvePhysicalLineDisplay(
       visibleLine,
       physicalLine,
@@ -494,8 +535,11 @@ export async function formatPhysicalLinesForReaderAsync(
     return formatPhysicalLinesForReader(physicalLines, options, preStrip);
   }
   const minCharCount = options.minCharCount ?? 0;
+  /** 编辑态写回：按物理行原文压缩/缩进，不走只读 MD 侧车剥离（避免 `<span id>` 等被删） */
+  const preservePhysicalSource = options.preservePhysicalSourceLines === true;
   const hasMdLinks =
     options.isMarkdown &&
+    !preservePhysicalSource &&
     (preStrip != null ||
       physicalLines.some(
         (line) =>
@@ -546,13 +590,17 @@ export async function formatPhysicalLinesForReaderAsync(
       const rawLine = physicalLines[i] ?? "";
       const strippedLine = contentLines[physicalLine - 1] ?? rawLine;
       if (
+        !preservePhysicalSource &&
         shouldOmitMdAnchorMetadataDisplayLine(mdStrip, rawLine, strippedLine)
       ) {
         continue;
       }
-      const visibleLine = mdStrip
-        ? strippedLine
-        : visibleReaderLineFromPhysicalRaw(rawLine);
+      const visibleLine = lineContentForPhysicalWriteBack(
+        rawLine,
+        strippedLine,
+        mdStrip,
+        preservePhysicalSource,
+      );
       const { shown } = resolvePhysicalLineDisplay(
         visibleLine,
         physicalLine,
@@ -634,14 +682,24 @@ export async function formatPhysicalLinesForReaderAsync(
     physicalLine += 1;
     const strippedLine = contentLines[physicalLine - 1] ?? rawLine;
     if (
+      !preservePhysicalSource &&
       shouldOmitMdAnchorMetadataDisplayLine(mdStrip, rawLine, strippedLine)
     ) {
       continue;
     }
-    if (isBlankPhysicalLineContent(strippedLine)) continue;
-    const visibleLine = mdStrip
-      ? strippedLine
-      : visibleReaderLineFromPhysicalRaw(rawLine);
+    if (
+      isBlankPhysicalLineContent(
+        blankCheckLineForFormat(rawLine, strippedLine, preservePhysicalSource),
+      )
+    ) {
+      continue;
+    }
+    const visibleLine = lineContentForPhysicalWriteBack(
+      rawLine,
+      strippedLine,
+      mdStrip,
+      preservePhysicalSource,
+    );
     const { shown } = resolvePhysicalLineDisplay(
       visibleLine,
       physicalLine,

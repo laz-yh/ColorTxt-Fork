@@ -704,6 +704,7 @@ export function registerAiIpcHandlers(): void {
       const removePiracyWatermarks =
         payloadRaw.removePiracyWatermarks === true;
       const restoreAsteriskMasks = payloadRaw.restoreAsteriskMasks === true;
+      const cleanHtmlRemnants = payloadRaw.cleanHtmlRemnants !== false;
       const skillPrompt =
         typeof payloadRaw.skillPrompt === "string"
           ? payloadRaw.skillPrompt
@@ -727,6 +728,7 @@ export function registerAiIpcHandlers(): void {
           removePiracyWatermarks,
           restoreGarbledChars,
           restoreAsteriskMasks,
+          cleanHtmlRemnants,
           ...(skillPrompt !== undefined ? { skillPrompt } : {}),
         },
         config: c,

@@ -150,6 +150,8 @@ export type AISmartFormatCleanupPayload = {
   removePiracyWatermarks: boolean;
   restoreGarbledChars: boolean;
   restoreAsteriskMasks: boolean;
+  /** 是否已在本地清理 HTML 残留；false 时系统提示词强调保留 HTML 结构 */
+  cleanHtmlRemnants?: boolean;
   /** 来自「技能 · 智能排版」的有效提示词；缺省时主进程用内置默认 */
   skillPrompt?: string;
 };

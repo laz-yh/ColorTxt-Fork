@@ -418,6 +418,9 @@ const emit = defineEmits<{
   readerEditLoaded: [payload: { encoding: string }];
   readerEditLoadFailed: [];
   readerEditSaveRequest: [];
+  readerEditCursorChange: [
+    payload: { line: number; column: number; selectionLength: number },
+  ];
   voiceReadResume: [];
   aiSmartFormatFull: [];
   aiSmartFormatSelection: [];
@@ -574,6 +577,7 @@ async function loadReaderEditFromDisk() {
     sealReaderEditBaseline();
     readerEditSuppressDirty = false;
     emit("readerEditLoaded", { encoding: r.encoding });
+    void nextTick(() => emitReaderEditCursorStatus());
   };
 
   requestAnimationFrame(() => {
@@ -757,6 +761,7 @@ function smartFormatPostProcessContext(): SmartFormatPostProcessContext {
     chapterMinCharCount: props.chapterMinCharCount,
     isMarkdown,
     preserveMarkdownSourceLines: props.readerEditMode && isMarkdown,
+    preservePhysicalSourceLines: props.readerEditMode,
   };
 }
 
@@ -771,6 +776,7 @@ function readerFormatOptions(
     minCharCount: ctx.chapterMinCharCount,
     isMarkdown: ctx.isMarkdown,
     preserveMarkdownSourceLines: ctx.preserveMarkdownSourceLines,
+    preservePhysicalSourceLines: ctx.preservePhysicalSourceLines,
     ...overrides,
   };
 }
@@ -2919,6 +2925,25 @@ function getViewportEndLine(): number {
 /**
  * @param fromScroll 来自视口滚动（onDidScrollChange）；为 false 时表示光标/程序性同步等
  */
+function emitReaderEditCursorStatus() {
+  if (!props.readerEditMode || smartFormatReviewActive.value) return;
+  const e = editor.value;
+  const m = model.value;
+  if (!e || !m) return;
+  const pos = e.getPosition();
+  if (!pos) return;
+  const sel = e.getSelection();
+  let selectionLength = 0;
+  if (sel && !sel.isEmpty()) {
+    selectionLength = m.getValueLengthInRange(sel);
+  }
+  emit("readerEditCursorChange", {
+    line: pos.lineNumber,
+    column: pos.column,
+    selectionLength,
+  });
+}
+
 function emitProbeLine(fromScroll = false) {
   const e = editor.value;
   if (!e) return;
@@ -3129,8 +3154,10 @@ onMounted(() => {
     const d2 = e.onDidChangeCursorPosition(() => {
       emitProbeLine(false);
       syncMinimapCursorLineDecoration();
+      emitReaderEditCursorStatus();
     });
     const dSel = e.onDidChangeCursorSelection(() => {
+      emitReaderEditCursorStatus();
       if (Date.now() < suppressHighlightTipUntilMs) {
         closeHighlightFloatUi();
         return;

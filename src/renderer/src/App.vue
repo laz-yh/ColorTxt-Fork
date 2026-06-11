@@ -639,6 +639,28 @@ const readerEditMode = ref(false);
 const readerEditorDirty = ref(false);
 const readerSaveEncoding = ref("utf8");
 
+type ReaderEditCursorStatus = {
+  line: number;
+  column: number;
+  selectionLength: number;
+};
+const readerEditCursorStatus = ref<ReaderEditCursorStatus | null>(null);
+
+const readerEditCursorFooterLabel = computed(() => {
+  if (!readerEditMode.value) return "";
+  const s = readerEditCursorStatus.value;
+  if (!s) return "";
+  let text = `行 ${s.line}，列 ${s.column}`;
+  if (s.selectionLength > 0) {
+    text += ` (已选择 ${s.selectionLength})`;
+  }
+  return text;
+});
+
+function onReaderEditCursorChange(payload: ReaderEditCursorStatus) {
+  readerEditCursorStatus.value = payload;
+}
+
 const footerEncodingActionsEnabled = computed(
   () =>
     Boolean(
@@ -2052,7 +2074,10 @@ watch(totalLineCount, () => {
 });
 
 watch(readerEditMode, (edit) => {
-  if (!edit) clearChapterRefreshDebounce();
+  if (!edit) {
+    clearChapterRefreshDebounce();
+    readerEditCursorStatus.value = null;
+  }
   if (!searchQuery.value.trim()) return;
   // 进入编辑：等磁盘原文写入 Monaco（readerEditLoaded）后再搜，避免只读展示文与列映射不一致
   if (edit) return;
@@ -2636,6 +2661,7 @@ useAppShellThemeWatch({
           @reader-edit-loaded="onReaderEditLoaded"
           @reader-edit-load-failed="onReaderEditLoadFailed"
           @reader-edit-save-request="onSaveReaderFile"
+          @reader-edit-cursor-change="onReaderEditCursorChange"
         />
         <VoiceReadToolbar
           :visible="isVoiceReadActive"
@@ -2710,6 +2736,7 @@ useAppShellThemeWatch({
         :path-menu-reload-enabled="footerPathMenuReloadEnabled"
         :path-menu-reconvert-enabled="footerPathMenuReconvertEnabled"
         :path-menu-close-enabled="footerPathMenuCloseEnabled"
+        :edit-cursor-label="readerEditCursorFooterLabel"
         @path-reveal-in-folder="revealCurrentFileInFolder"
         @path-reload="reloadCurrentFileFromDisk"
         @path-reconvert="reconvertCurrentEbookFromDisk"

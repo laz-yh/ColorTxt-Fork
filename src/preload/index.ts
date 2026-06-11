@@ -507,6 +507,7 @@ const api = {
       removePiracyWatermarks: boolean;
       restoreGarbledChars: boolean;
       restoreAsteriskMasks: boolean;
+      cleanHtmlRemnants?: boolean;
       skillPrompt?: string;
     }) =>
       ipcRenderer.invoke("ai:text-format:cleanup", payload) as Promise<

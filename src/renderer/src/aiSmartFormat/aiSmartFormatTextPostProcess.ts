@@ -8,6 +8,7 @@ export type SmartFormatPostProcessContext = {
   chapterMinCharCount: number;
   isMarkdown: boolean;
   preserveMarkdownSourceLines: boolean;
+  preservePhysicalSourceLines: boolean;
 };
 
 export function buildSmartFormatPostProcessOptions(
@@ -21,6 +22,7 @@ export function buildSmartFormatPostProcessOptions(
     minCharCount: ctx.chapterMinCharCount,
     isMarkdown: ctx.isMarkdown,
     preserveMarkdownSourceLines: ctx.preserveMarkdownSourceLines,
+    preservePhysicalSourceLines: ctx.preservePhysicalSourceLines,
     ...overrides,
   };
 }
