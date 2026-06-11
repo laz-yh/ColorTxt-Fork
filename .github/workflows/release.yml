@@ -185,4 +185,4 @@ jobs:
             ls -laR release artifacts 2>/dev/null || true
             exit 1
           fi
-          npx electron-builder publish --publish always "${args[@]}"
+          npx electron-builder publish --policy always "${args[@]}"
