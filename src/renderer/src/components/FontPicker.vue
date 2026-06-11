@@ -251,50 +251,54 @@ onBeforeUnmount(() => {
       @click.stop
     >
       <div v-if="!showOtherFontsPanel" class="fontMenuList">
-        <button
-          v-for="item in presetFontMenuItems"
-          :key="item.key"
-          class="fontMenuItem"
-          :class="{ active: selectedFont.key === item.key }"
-          :style="{ fontFamily: cssFontFamilyStack(item.stack) }"
-          @click="choosePreset(item.key)"
-        >
-          {{ item.label }}
-        </button>
+        <div class="fontMenuListBody">
+          <button
+            v-for="item in presetFontMenuItems"
+            :key="item.key"
+            class="fontMenuItem"
+            :class="{ active: selectedFont.key === item.key }"
+            :style="{ fontFamily: cssFontFamilyStack(item.stack) }"
+            @click="choosePreset(item.key)"
+          >
+            {{ item.label }}
+          </button>
 
-        <div
-          v-for="item in outerOtherFontItems"
-          :key="item.name"
-          class="fontMenuItemRow"
-          :class="{ active: isOtherFontSelected(item.name) }"
-        >
-          <button
-            type="button"
-            class="fontMenuItem fontMenuItem--other"
-            :style="{ fontFamily: cssFontFamilyStack([item.name]) }"
-            @click="onOtherFontRowClick(item.name)"
+          <div
+            v-for="item in outerOtherFontItems"
+            :key="item.name"
+            class="fontMenuItemRow"
+            :class="{ active: isOtherFontSelected(item.name) }"
           >
-            {{ item.name }}
-          </button>
-          <button
-            type="button"
-            class="fontMenuPinBtn"
-            :class="{ 'fontMenuPinBtn--active': item.pinned }"
-            :title="item.pinned ? '取消固定' : '固定到列表'"
-            :aria-label="item.pinned ? '取消固定' : '固定到列表'"
-            :aria-pressed="item.pinned"
-            @click="onPinOtherFontClick(item.name, $event)"
-          >
-            <span
-              class="fontMenuPinIcon"
-              v-html="item.pinned ? icons.pinActive : icons.pin"
-            ></span>
-          </button>
+            <button
+              type="button"
+              class="fontMenuItem fontMenuItem--other"
+              :style="{ fontFamily: cssFontFamilyStack([item.name]) }"
+              @click="onOtherFontRowClick(item.name)"
+            >
+              {{ item.name }}
+            </button>
+            <button
+              type="button"
+              class="fontMenuPinBtn"
+              :class="{ 'fontMenuPinBtn--active': item.pinned }"
+              :title="item.pinned ? '取消固定' : '固定到列表'"
+              :aria-label="item.pinned ? '取消固定' : '固定到列表'"
+              :aria-pressed="item.pinned"
+              @click="onPinOtherFontClick(item.name, $event)"
+            >
+              <span
+                class="fontMenuPinIcon"
+                v-html="item.pinned ? icons.pinActive : icons.pin"
+              ></span>
+            </button>
+          </div>
         </div>
 
-        <div class="fontMenuDivider"></div>
+        <div class="fontMenuListFooter">
+          <div class="fontMenuDivider"></div>
 
-        <button class="fontMenuItem" @click="openOtherFonts">其他字体</button>
+          <button class="fontMenuItem" @click="openOtherFonts">其他字体</button>
+        </div>
       </div>
 
       <div v-else class="fontOtherPanel">
@@ -425,6 +429,25 @@ onBeforeUnmount(() => {
 }
 
 .fontMenuList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 70vh;
+  min-height: 0;
+}
+
+.fontMenuListBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-right: 2px;
+}
+
+.fontMenuListFooter {
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
