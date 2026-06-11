@@ -44,7 +44,32 @@ npm run build
 
 ### 发布
 
-GitHub 用户 Settings -> Developer settings -> Personal access tokens，生成一个 Token 并勾选 `repo` 权限。
+#### GitHub Actions 自动发布（三端并行）
+
+仓库已配置 [`.github/workflows/release.yml`](.github/workflows/release.yml)。推送版本 tag 后，会在 Windows / macOS / Linux 上并行构建并上传到同一 GitHub Release，无需在三台机器上分别打包。
+
+```bash
+# 更新版本号（会同步改 package.json、打 tag）
+npm version patch|minor|major
+
+# 推送代码与 tag（tag 推送会触发 CI）
+git push && git push --tags
+```
+
+要求：**tag 须为 `v` + `package.json` 中的 `version`**（例如版本 `2.4.3` 对应 tag `v2.4.3`）。CI 会校验二者一致。
+
+也可在 GitHub 仓库 **Actions → Release → Run workflow** 手动触发（用于补跑）。
+
+产物与本地 `npm run release` 一致：Windows（NSIS + Portable）、macOS（DMG，Apple Silicon）、Linux（AppImage）。macOS 未配置签名证书时以未签名包发布（`CSC_IDENTITY_AUTO_DISCOVERY=false`）。
+
+#### 本地手动发布
+
+若需在单机上打包并上传，仍可使用本地命令。
+
+需 Personal access token（`repo` 权限）并设置 `GH_TOKEN`：
+
+GitHub 用户 Settings -> Developer settings -> Personal access tokens，
+生成一个 Token 并勾选 `repo` 权限。
 
 设置 GitHub Token 环境变量：
 
