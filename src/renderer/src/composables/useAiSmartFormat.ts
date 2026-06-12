@@ -17,6 +17,8 @@ import {
 import { prepareTextForAiFormat } from "../reader/readerTextInputHygiene";
 import { cleanHtmlRemnantsInText } from "@shared/htmlRemnantCleanup";
 import {
+  applySegmentTextToWorkingLines,
+  extractSegmentTextFromWorkingLines,
   lineDeltaAfterReplace,
   planFullTextSegments,
   planSelectionSegments,
@@ -228,9 +230,12 @@ export function useAiSmartFormat(deps: {
     const reader = deps.readerRef.value;
     if (!reader) return { ok: false, fatal: true, message: "编辑器未就绪" };
     reader.revealSmartFormatSegment?.(plan.startLine, plan.endLine);
-    const startIdx = plan.startLine - rangeStart + lineDeltaAcc.value;
-    const endIdx = plan.endLine - rangeStart + lineDeltaAcc.value;
-    const text = workingLines.slice(startIdx, endIdx + 1).join("\n");
+    const text = extractSegmentTextFromWorkingLines(
+      workingLines,
+      plan,
+      rangeStart,
+      lineDeltaAcc.value,
+    );
     const { contextBefore, contextAfter } = readLinesFromModel(
       plan.startLine,
       plan.endLine,
@@ -240,11 +245,7 @@ export function useAiSmartFormat(deps: {
       working = cleanHtmlRemnantsInText(working);
     }
     const baseline = working;
-    if (
-      !working.trim() &&
-      !settings.autoCompressBlank &&
-      !settings.autoLeadIndent
-    ) {
+    if (!working.trim()) {
       if (total > 1) progressCurrent.value = index + 1;
       return { ok: true, skipped: true };
     }
@@ -319,44 +320,68 @@ export function useAiSmartFormat(deps: {
         return { ok: true, skipped: true };
       }
     }
+
+    // 压缩空行/行首缩进仅在全文合并后执行（finalizeSmartFormatProposedText）。
+    // 段内后置会在行内切块时把 keepOneBlank 补出的 \n 写回同一物理行，造成句中硬换行。
     let changed = false;
     if (working !== text) {
-      const newLines = working.split("\n");
-      workingLines.splice(startIdx, endIdx - startIdx + 1, ...newLines);
+      applySegmentTextToWorkingLines(
+        workingLines,
+        plan,
+        rangeStart,
+        lineDeltaAcc.value,
+        working,
+      );
       lineDeltaAcc.value += lineDeltaAfterReplace(text, working);
       changed = true;
     }
     if (total > 1) progressCurrent.value = index + 1;
     return { ok: true, changed };
   }
-  function buildProposedText(
-    originalText: string,
+
+  /**
+   * 压缩空行 / 行首缩进仅在全文合并后做一次：
+   * - 行内切块时段内后置会把 keepOneBlank 的换行写进半行片段，拼回后产生句中硬换行；
+   * - 分段边界处的空行也须按全文规则统一处理。
+   */
+  function finalizeSmartFormatProposedText(
+    text: string,
     settings: AiSmartFormatSettings,
   ): string {
+    if (!settings.autoCompressBlank && !settings.autoLeadIndent) {
+      return text;
+    }
     return applySmartFormatPostProcessToText(
-      originalText,
+      text,
       settings,
       readPostProcessContext(),
       deps.compressBlankKeepOneBlank.value,
     );
   }
+
   async function runSmartFormat(scope: AiSmartFormatScope): Promise<void> {
     if (running.value || reviewOpen.value) return;
     if (!canUseSmartFormat()) {
       appToast("请先在设置 → 编辑中启用 AI 智能排版选项");
       return;
     }
-    if (aiSmartFormatNeedsLlm(deps.aiSmartFormat.value)) {
-      try {
-        const c = await window.colorTxt.ai.configGet();
-        if (!c.aiEnabled || !c.chat?.model?.trim()) {
+    const settings = { ...deps.aiSmartFormat.value };
+    const needsLlm = aiSmartFormatNeedsLlm(settings);
+    let chatMaxTokens: number | undefined;
+    let chatTokenPricePerMillion: AITokenPricePerMillion | null = null;
+    try {
+      const aiConfig = await window.colorTxt.ai.configGet();
+      chatMaxTokens = aiConfig.chat?.maxTokens;
+      chatTokenPricePerMillion = aiConfig.chat?.tokenPricePerMillion ?? null;
+      if (needsLlm) {
+        if (!aiConfig.aiEnabled || !aiConfig.chat?.model?.trim()) {
           await appAlert("请先在设置中启用 AI 阅读助手并配置对话模型。");
           return;
         }
-      } catch {
-        await appAlert("无法读取 AI 配置。");
-        return;
       }
+    } catch {
+      await appAlert("无法读取 AI 配置。");
+      return;
     }
     const reader = deps.readerRef.value;
     if (!reader) return;
@@ -368,7 +393,12 @@ export function useAiSmartFormat(deps: {
     }
     let plans: SmartFormatSegmentPlan[] = [];
     if (scope === "full") {
-      plans = planFullTextSegments(lineCount, deps.chapters.value, fullText);
+      plans = planFullTextSegments(
+        lineCount,
+        deps.chapters.value,
+        fullText,
+        chatMaxTokens,
+      );
     } else {
       const range = reader.getSelectionRange?.();
       if (!range || range.isEmpty()) {
@@ -379,6 +409,7 @@ export function useAiSmartFormat(deps: {
         fullText,
         range.startLineNumber,
         range.endLineNumber,
+        chatMaxTokens,
       );
     }
     if (plans.length === 0) {
@@ -388,43 +419,16 @@ export function useAiSmartFormat(deps: {
     const rangeStart = plans[0]!.startLine;
     const rangeEnd = plans[plans.length - 1]!.endLine;
     const originalText = readLinesFromModel(rangeStart, rangeEnd).text;
-    const settings = { ...deps.aiSmartFormat.value };
-    const needsSegmentLoop =
-      aiSmartFormatNeedsLlm(settings) || settings.cleanHtmlRemnants;
     resetProgressTokenUsage();
     running.value = true;
     progressOpen.value = true;
     reader.setSmartFormatRunning?.(true);
-    if (!needsSegmentLoop) {
-      progressLabel.value = "应用格式化…";
-      try {
-        const proposedText = buildProposedText(originalText, settings);
-        finishWithProposedReview(
-          scope,
-          rangeStart,
-          rangeEnd,
-          originalText,
-          proposedText,
-        );
-      } catch {
-        unlockSmartFormatRunning();
-        progressOpen.value = false;
-        await appAlert("排版处理失败。");
-      }
-      return;
-    }
     progressCurrent.value = 0;
     progressTotal.value = plans.length;
     progressLabel.value = "准备中…";
-    if (aiSmartFormatNeedsLlm(settings)) {
+    if (needsLlm) {
       progressShowTokenUsage.value = true;
-      try {
-        const c = await window.colorTxt.ai.configGet();
-        progressTokenPricePerMillion.value =
-          c.chat?.tokenPricePerMillion ?? null;
-      } catch {
-        progressTokenPricePerMillion.value = null;
-      }
+      progressTokenPricePerMillion.value = chatTokenPricePerMillion;
     }
     activeRequestId = smartFormatRequestIdSeq++;
     abortAc = new AbortController();
@@ -482,8 +486,10 @@ export function useAiSmartFormat(deps: {
           lastPlan.endLine,
         ).text;
         const endIdx = lastPlan.endLine - rangeStart + lineDeltaAcc.value;
-        let partialProposed = workingLines.slice(0, endIdx + 1).join("\n");
-        partialProposed = buildProposedText(partialProposed, settings);
+        const partialProposed = finalizeSmartFormatProposedText(
+          workingLines.slice(0, endIdx + 1).join("\n"),
+          settings,
+        );
         finishWithProposedReview(
           scope,
           rangeStart,
@@ -494,8 +500,10 @@ export function useAiSmartFormat(deps: {
         );
         return;
       }
-      let proposedText = workingLines.join("\n");
-      proposedText = buildProposedText(proposedText, settings);
+      const proposedText = finalizeSmartFormatProposedText(
+        workingLines.join("\n"),
+        settings,
+      );
       finishWithProposedReview(
         scope,
         rangeStart,

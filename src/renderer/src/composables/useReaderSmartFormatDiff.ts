@@ -284,7 +284,7 @@ export function useReaderSmartFormatDiff(deps: {
         ...wireCursor(editor.getOriginalEditor()),
         ...wireCursor(editor.getModifiedEditor()),
       ];
-      emit(editor.getModifiedEditor());
+      deps.onDiffEditorCursorActivity(editor.getModifiedEditor());
     }
 
     editor.layout();

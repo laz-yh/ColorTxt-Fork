@@ -1,4 +1,5 @@
 import type { WebContents } from "electron";
+import { smartFormatCompletionMaxTokens } from "@shared/aiSmartFormatChunkLimits";
 import type {
   AISmartFormatCleanupPayload,
   AISmartFormatCleanupResult,
@@ -277,6 +278,10 @@ export async function runSmartFormatCleanupSegment(opts: {
             { role: "user", content: user },
           ],
           temperature: 0,
+          maxTokens: smartFormatCompletionMaxTokens(
+            payload.segment.text.length,
+            chat.maxTokens,
+          ),
           signal,
         }),
     });
