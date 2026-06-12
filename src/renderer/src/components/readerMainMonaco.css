@@ -174,11 +174,31 @@
 }
 
 /*
+ * 溢出挂件容器：零尺寸 fixed 层，不挡点击；子节点恢复 pointer-events。
+ * 须同时带 `monaco-editor` + 主题类（见 ReaderMain.ensureReaderMonacoOverflowHost）。
+ */
+.reader-monaco-overflow-host {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 10050;
+}
+
+.reader-monaco-overflow-host > * {
+  pointer-events: auto;
+}
+
+/*
  * 脚注等长文案悬停：Monaco 内建 DomScrollableElement，超高时按需出滚动条。
  * 勿 flex 居中 / pointer-events:none，否则内容被裁切且无法移入面板滚动。
- * `overflowWidgetsDomNode: body` 后 VS Code 主题变量不在作用域，须用 `--panel` 等全局回退。
+ * 挂到 overflow host 后 `.monaco-editor .xxx` 仍可能缺 VS Code 变量，须 `--panel` 等回退。
  */
 .monaco-editor .monaco-resizable-hover,
+.reader-monaco-overflow-host .monaco-resizable-hover,
 body > .overflowingContentWidgets .monaco-resizable-hover,
 .overflowingContentWidgets .monaco-resizable-hover {
   background-color: var(
@@ -190,8 +210,12 @@ body > .overflowingContentWidgets .monaco-resizable-hover,
 }
 
 .monaco-editor .monaco-resizable-hover > .monaco-hover,
+.reader-monaco-overflow-host .monaco-resizable-hover > .monaco-hover,
+.reader-monaco-overflow-host .monaco-hover,
 body > .overflowingContentWidgets .monaco-resizable-hover > .monaco-hover,
-.overflowingContentWidgets .monaco-resizable-hover > .monaco-hover {
+.overflowingContentWidgets .monaco-resizable-hover > .monaco-hover,
+body > .overflowingContentWidgets .monaco-hover,
+.overflowingContentWidgets .monaco-hover {
   background-color: var(
     --vscode-editorHoverWidget-background,
     var(--panel)
@@ -204,12 +228,45 @@ body > .overflowingContentWidgets .monaco-resizable-hover > .monaco-hover,
   pointer-events: auto !important;
 }
 
+/*
+ * 补全/「无建议」等 suggest 挂件：挂到 overflow host 后须补背景与边框。
+ */
+.reader-monaco-overflow-host .suggest-widget,
+.reader-monaco-overflow-host .suggest-details,
+body > .overflowingContentWidgets .suggest-widget,
+.overflowingContentWidgets .suggest-widget,
+body > .overflowingContentWidgets .suggest-details,
+.overflowingContentWidgets .suggest-details {
+  background-color: var(
+    --vscode-editorSuggestWidget-background,
+    var(--panel)
+  ) !important;
+  color: var(--vscode-editorSuggestWidget-foreground, var(--fg)) !important;
+  border: 1px solid
+    var(--vscode-editorSuggestWidget-border, var(--border)) !important;
+  border-radius: 3px !important;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--fg) 12%, transparent);
+  z-index: 10050;
+}
+
+.reader-monaco-overflow-host .suggest-widget .message,
+body > .overflowingContentWidgets .suggest-widget .message,
+.overflowingContentWidgets .suggest-widget .message {
+  color: var(--vscode-editorSuggestWidget-foreground, var(--fg)) !important;
+}
+
 /* 挂到 body 的悬停滚动条：沿用阅读区滚动条色，超长脚注可拖滑块阅读 */
+.reader-monaco-overflow-host .monaco-hover .monaco-scrollable-element > .scrollbar,
 body > .overflowingContentWidgets .monaco-hover .monaco-scrollable-element > .scrollbar,
 .overflowingContentWidgets .monaco-hover .monaco-scrollable-element > .scrollbar {
   background: var(--vscode-scrollbar-background, var(--scrollbar-track)) !important;
 }
 
+.reader-monaco-overflow-host
+  .monaco-hover
+  .monaco-scrollable-element
+  > .scrollbar
+  > .slider,
 body > .overflowingContentWidgets
   .monaco-hover
   .monaco-scrollable-element
@@ -226,6 +283,11 @@ body > .overflowingContentWidgets
   ) !important;
 }
 
+.reader-monaco-overflow-host
+  .monaco-hover
+  .monaco-scrollable-element
+  > .scrollbar
+  > .slider:hover,
 body > .overflowingContentWidgets
   .monaco-hover
   .monaco-scrollable-element

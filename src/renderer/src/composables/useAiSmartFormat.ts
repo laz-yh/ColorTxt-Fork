@@ -458,7 +458,7 @@ export function useAiSmartFormat(deps: {
             progressOpen.value = false;
             unlockSmartFormatRunning();
             await appAlert(
-              `${outcome.message}\n\n主文档未被修改，请检查网络后重新执行。`,
+              `${outcome.message}\n\n，请检查网络后重新执行。`,
             );
             return;
           }

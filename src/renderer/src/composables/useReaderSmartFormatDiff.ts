@@ -49,6 +49,8 @@ export function useReaderSmartFormatDiff(deps: {
   session: () => SmartFormatReviewSession | null | undefined;
   getCreateOptionsInput: () => ReaderEditorCreateOptionsInput;
   onContextMenuRequest?: (request: SmartFormatDiffContextMenuRequest) => void;
+  /** Diff 左右侧编辑器光标/选区/聚焦变化时回调（用于底栏行列号） */
+  onDiffEditorCursorActivity?: (editor: monaco.editor.ICodeEditor) => void;
 }) {
   const diffEditor = shallowRef<monaco.editor.IStandaloneDiffEditor | null>(
     null,
@@ -62,6 +64,7 @@ export function useReaderSmartFormatDiff(deps: {
   let modifiedContentDisposable: monaco.IDisposable | null = null;
   let uninstallRevertUi: (() => void) | null = null;
   let diffContextMenuDisposables: monaco.IDisposable[] = [];
+  let diffCursorDisposables: monaco.IDisposable[] = [];
   let diffMarginRepairDisposable: monaco.IDisposable | null = null;
 
   function disposeDiffEditor() {
@@ -73,6 +76,8 @@ export function useReaderSmartFormatDiff(deps: {
     uninstallRevertUi = null;
     for (const d of diffContextMenuDisposables) d.dispose();
     diffContextMenuDisposables = [];
+    for (const d of diffCursorDisposables) d.dispose();
+    diffCursorDisposables = [];
     diffMarginRepairDisposable?.dispose();
     diffMarginRepairDisposable = null;
     diffEditor.value?.dispose();
@@ -264,6 +269,22 @@ export function useReaderSmartFormatDiff(deps: {
           .getModifiedEditor()
           .onContextMenu((ev) => openMenu("modified", editor.getModifiedEditor(), ev)),
       ];
+    }
+
+    if (deps.onDiffEditorCursorActivity) {
+      const wireCursor = (ed: monaco.editor.ICodeEditor) => {
+        const emit = () => deps.onDiffEditorCursorActivity?.(ed);
+        return [
+          ed.onDidChangeCursorPosition(emit),
+          ed.onDidChangeCursorSelection(emit),
+          ed.onDidFocusEditorWidget(emit),
+        ];
+      };
+      diffCursorDisposables = [
+        ...wireCursor(editor.getOriginalEditor()),
+        ...wireCursor(editor.getModifiedEditor()),
+      ];
+      emit(editor.getModifiedEditor());
     }
 
     editor.layout();

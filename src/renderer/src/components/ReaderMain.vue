@@ -284,6 +284,39 @@ let unsubModalStack: (() => void) | null = null;
 let removeVoiceReadKeyCapture: (() => void) | null = null;
 let removeSmartFormatReviewKeyCapture: (() => void) | null = null;
 const builtInThemes = new Set(["vs", "vs-dark"]);
+/** 脚注/补全等溢出挂件容器（须带 `monaco-editor` + 主题类，否则挂到 body 后默认样式失效） */
+let readerMonacoOverflowHost: HTMLDivElement | null = null;
+
+function resolveMonacoThemeClass(themeName: string): string {
+  if (themeName === "vs") return "vs";
+  if (builtInThemes.has(themeName)) return themeName;
+  return "vs-dark";
+}
+
+function ensureReaderMonacoOverflowHost(): HTMLDivElement {
+  if (readerMonacoOverflowHost?.isConnected) return readerMonacoOverflowHost;
+  const host = document.createElement("div");
+  host.className = "monaco-editor reader-monaco-overflow-host";
+  host.classList.add(resolveMonacoThemeClass(lastAppThemeName));
+  document.body.appendChild(host);
+  readerMonacoOverflowHost = host;
+  return host;
+}
+
+function syncReaderMonacoOverflowHostTheme(themeName: string): void {
+  const host = readerMonacoOverflowHost;
+  if (!host) return;
+  for (const cls of ["vs", "vs-dark", "hc-black", "hc-light"]) {
+    host.classList.remove(cls);
+  }
+  host.classList.add(resolveMonacoThemeClass(themeName));
+}
+
+function disposeReaderMonacoOverflowHost(): void {
+  readerMonacoOverflowHost?.remove();
+  readerMonacoOverflowHost = null;
+}
+
 /** 行高 = round(fontSize * multiple)，由 App 持久化并同步 */
 let lineHeightMultiple = defaultReaderLineHeightMultiple;
 let currentFontFamily = READER_EDITOR_DEFAULT_FONT_FAMILY;
@@ -481,6 +514,7 @@ const {
       diffReviewContextMenuY.value = request.y;
       diffReviewContextMenuOpen.value = true;
     },
+    onDiffEditorCursorActivity: (ed) => emitReaderEditCursorStatus(ed),
   });
 
 function onSmartFormatReviewApply() {
@@ -2108,6 +2142,7 @@ function setTheme(themeName: string) {
   } else {
     monaco.editor.setTheme("vs-dark");
   }
+  syncReaderMonacoOverflowHostTheme(themeName);
   forceOverviewRulerCanvasRepaint();
   if (smartFormatReviewActive.value) {
     requestAnimationFrame(() => layoutDiffEditor());
@@ -2922,26 +2957,45 @@ function getViewportEndLine(): number {
   return Math.max(1, r.endLineNumber);
 }
 
-/**
- * @param fromScroll 来自视口滚动（onDidScrollChange）；为 false 时表示光标/程序性同步等
- */
-function emitReaderEditCursorStatus() {
-  if (!props.readerEditMode || smartFormatReviewActive.value) return;
-  const e = editor.value;
-  const m = model.value;
-  if (!e || !m) return;
-  const pos = e.getPosition();
-  if (!pos) return;
-  const sel = e.getSelection();
+function readerEditCursorPayload(
+  ed: monaco.editor.ICodeEditor,
+): { line: number; column: number; selectionLength: number } | null {
+  const m = ed.getModel();
+  const pos = ed.getPosition();
+  if (!m || !pos) return null;
+  const sel = ed.getSelection();
   let selectionLength = 0;
   if (sel && !sel.isEmpty()) {
     selectionLength = m.getValueLengthInRange(sel);
   }
-  emit("readerEditCursorChange", {
+  return {
     line: pos.lineNumber,
     column: pos.column,
     selectionLength,
-  });
+  };
+}
+
+/** 底栏行列号：Diff 预览时跟随当前聚焦的左/右编辑器，否则为主编辑器 */
+function emitReaderEditCursorStatus(fromEditor?: monaco.editor.ICodeEditor) {
+  if (!props.readerEditMode) return;
+  let ed = fromEditor;
+  if (!ed) {
+    if (smartFormatReviewActive.value) {
+      const diff = smartFormatDiffEditor.value;
+      if (!diff) return;
+      const modified = diff.getModifiedEditor();
+      const original = diff.getOriginalEditor();
+      if (modified.hasTextFocus()) ed = modified;
+      else if (original.hasTextFocus()) ed = original;
+      else return;
+    } else {
+      ed = editor.value ?? undefined;
+    }
+  }
+  if (!ed) return;
+  const payload = readerEditCursorPayload(ed);
+  if (!payload) return;
+  emit("readerEditCursorChange", payload);
 }
 
 function emitProbeLine(fromScroll = false) {
@@ -3117,8 +3171,8 @@ onMounted(() => {
 
   editor.value = monaco.editor.create(editorEl.value!, {
     model: m,
-    /** 脚注悬停等溢出挂件挂到 body，脱离 `.editorHost { overflow:hidden }` */
-    overflowWidgetsDomNode: document.body,
+    /** 脚注悬停/补全等溢出挂件挂到专用容器，脱离 `.editorHost { overflow:hidden }` */
+    overflowWidgetsDomNode: ensureReaderMonacoOverflowHost(),
     ...buildReaderEditorCreateOptions({
       fontSize: READER_EDITOR_DEFAULT_FONT_SIZE,
       lineHeightMultiple,
@@ -3154,10 +3208,10 @@ onMounted(() => {
     const d2 = e.onDidChangeCursorPosition(() => {
       emitProbeLine(false);
       syncMinimapCursorLineDecoration();
-      emitReaderEditCursorStatus();
+      if (!smartFormatReviewActive.value) emitReaderEditCursorStatus();
     });
     const dSel = e.onDidChangeCursorSelection(() => {
-      emitReaderEditCursorStatus();
+      if (!smartFormatReviewActive.value) emitReaderEditCursorStatus();
       if (Date.now() < suppressHighlightTipUntilMs) {
         closeHighlightFloatUi();
         return;
@@ -3303,6 +3357,7 @@ onBeforeUnmount(() => {
   removeSmartFormatReviewKeyCapture = null;
   editor.value?.dispose();
   model.value?.dispose();
+  disposeReaderMonacoOverflowHost();
   for (const d of providersDisposables) d.dispose();
   providersDisposables = [];
 });
@@ -3389,6 +3444,7 @@ watch(smartFormatReviewActive, (active) => {
   if (!active) {
     closeDiffReviewContextMenu();
     requestAnimationFrame(() => editor.value?.layout());
+    void nextTick(() => emitReaderEditCursorStatus());
     return;
   }
   const onKey = (ev: KeyboardEvent) => {

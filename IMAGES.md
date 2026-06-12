@@ -56,6 +56,12 @@
 
 ![](./images/角色卡_立绘生成.jpg)
 
+### AI 智能排版
+
+#### Diff 预览
+
+![](./images/AI智能排版_Diff预览.jpg)
+
 ### 语音朗读
 
 ![](./images/语音朗读.jpg)
