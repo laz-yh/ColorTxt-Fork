@@ -109,6 +109,7 @@ export function buildReaderEditorSharedCoreOptions(
   | "hover"
   | "maxTokenizationLineLength"
   | "stopRenderingLineAfter"
+  | "largeFileOptimizations"
 > {
   const {
     fontSize,
@@ -153,6 +154,12 @@ export function buildReaderEditorSharedCoreOptions(
     maxTokenizationLineLength: 1_000_000,
     /** 默认 10000 后停止渲染且 hover 提示；`-1` 为不截断 */
     stopRenderingLineAfter: -1,
+    /**
+     * Monaco 默认 true：>30 万行或 >20MB 时 `isTooLargeForTokenization()`，
+     * 会改用 ViewModelLinesFromModelAsIs（彻底关闭 viewport 换行）并跳过 sticky scroll。
+     * 网文转载 txt 常一行一句，行数易超 30 万；关闭此项以换取正确排版（更慢、更占内存）。
+     */
+    largeFileOptimizations: false,
   };
 }
 
