@@ -304,6 +304,10 @@ onBeforeUnmount(() => {
             {{ entry.displayName || "佚名" }}
           </div>
           <div ref="backScrollEl" class="backScroll">
+            <div v-if="entry.aliases?.trim()" class="backLine">
+              <div class="k">别名</div>
+              <div class="v">{{ entry.aliases.trim() }}</div>
+            </div>
             <div v-if="entry.ageText" class="backLine">
               <div class="k">年龄</div>
               <div class="v">{{ entry.ageText }}</div>
@@ -322,6 +326,7 @@ onBeforeUnmount(() => {
             </div>
             <div
               v-if="
+                !entry.aliases?.trim() &&
                 !entry.ageText &&
                 !entry.identity &&
                 !entry.bio &&

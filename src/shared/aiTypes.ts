@@ -322,7 +322,9 @@ export interface PortraitExtractResult {
   bio_zh: string;
   /** 主要人物关系 */
   relations_zh: string;
-  /** 本轮检索对话模型实际 token 消耗（含重试） */
+  /** 合并用户填写与检索识别后的别名（不含角色名） */
+  aliases: string[];
+  /** 本轮检索对话模型实际 token 消耗（含别名发现，含重试） */
   tokenUsage?: AITokenUsageTotals;
   /** 是否从模型响应解析到 usage */
   tokenUsageAvailable?: boolean;

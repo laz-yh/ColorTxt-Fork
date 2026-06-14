@@ -20,6 +20,11 @@ import {
   ZERO_TOKEN_USAGE,
 } from "@shared/aiTokenUsage";
 import { readActiveChatEndpoint } from "@shared/aiEndpointProfiles";
+import {
+  extractAliasesFromPortraitFields,
+  mergeCharacterAliases,
+  normalizeAliasCandidates,
+} from "@shared/characterAliases";
 
 /** 与「文生图接口」报错区分，便于侧栏立绘生成排障 */
 const PORTRAIT_TRANSLATE_ERR_PREFIX = "提示词译英（对话模型）";
@@ -47,10 +52,42 @@ function formatTxt2ImgStepError(detail: string): string {
   return `文生图接口（${d}）`;
 }
 
-function portraitSearchQueries(characterName: string): string[] {
-  const n = characterName.trim();
+function portraitAppearanceQueries(name: string): string[] {
+  const n = name.trim();
   if (!n) return [];
   return [`${n} 外貌`, `${n} 容貌`, `${n} 身穿`, `${n} 长相`, n];
+}
+
+function portraitAliasDiscoveryQueries(name: string): string[] {
+  const n = name.trim();
+  if (!n) return [];
+  return [
+    `${n} 人称`,
+    `${n} 绰号`,
+    `${n} 外号`,
+    `${n} 又称`,
+    `${n} 别名`,
+    `${n} 号称`,
+  ];
+}
+
+function portraitSearchQueries(
+  characterName: string,
+  aliases: readonly string[],
+): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  const addName = (raw: string) => {
+    const n = raw.trim();
+    if (!n) return;
+    const key = n.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    names.push(n);
+  };
+  addName(characterName);
+  for (const a of aliases) addName(a);
+  return names.flatMap((n) => portraitAppearanceQueries(n));
 }
 
 function bookStyleSearchQueries(fileTitle: string): string[] {
@@ -105,8 +142,12 @@ async function mergedRagHitsForPortrait(opts: {
 
 const MAX_SNIPPET_CHARS = 900;
 const MAX_COMBINED_CONTEXT = 14_000;
+const MAX_ALIAS_DISCOVERY_CONTEXT = 8_000;
 
-function buildRetrievalContext(hits: AIIndexSearchHit[]): string {
+function buildRetrievalContext(
+  hits: AIIndexSearchHit[],
+  maxChars = MAX_COMBINED_CONTEXT,
+): string {
   const parts: string[] = [];
   let total = 0;
   for (const h of hits) {
@@ -116,7 +157,7 @@ function buildRetrievalContext(hits: AIIndexSearchHit[]): string {
         ? `${h.content.slice(0, MAX_SNIPPET_CHARS)}…`
         : h.content;
     const piece = `${header}${body}\n\n`;
-    if (total + piece.length > MAX_COMBINED_CONTEXT) break;
+    if (total + piece.length > maxChars) break;
     parts.push(piece);
     total += piece.length;
   }
@@ -166,6 +207,7 @@ function normalizeExtractFromParsed(
       identity_zh: "",
       bio_zh: "",
       relations_zh: "",
+      aliases: [],
     };
   }
 
@@ -244,6 +286,8 @@ function normalizeExtractFromParsed(
       ? o.relations_zh.trim()
       : String(o.relations_zh ?? "").trim();
 
+  const aliases = normalizeAliasCandidates(o.aliases);
+
   return {
     excerpts,
     appearance_zh:
@@ -260,6 +304,7 @@ function normalizeExtractFromParsed(
     identity_zh,
     bio_zh,
     relations_zh,
+    aliases,
   };
 }
 
@@ -284,14 +329,91 @@ function attachTokenUsage<T extends PortraitExtractResult | BookStyleInferResult
   };
 }
 
+async function callAliasDiscoveryLlm(opts: {
+  chat: AIChatEndpoint;
+  characterName: string;
+  retrievalContext: string;
+  signal?: AbortSignal;
+}): Promise<{ aliases: string[]; usage: AITokenUsageTotals | null }> {
+  const { chat, characterName, retrievalContext, signal } = opts;
+
+  const system = `你是中文小说角色别名识别助手。
+仅依据用户给出的「检索片段」，找出与指定角色名指代同一人物的称呼（绰号、外号、道号、尊称、江湖名号等）。
+不要将其他独立人物名称、亲属称谓（如「师父」「师姐」）或与该角色无关的普通名词当作别名。
+若无明确依据，aliases 须为空数组。
+输出必须是单一 JSON 对象，不要 Markdown、不要代码围栏，键如下：
+{ "aliases": string[] }`;
+
+  const userMain = `角色名：「${characterName}」
+
+以下是本书向量检索得到的片段（可能不完整或含有噪声）：
+
+---
+${retrievalContext || "（无检索结果）"}
+---
+
+请输出 JSON。`;
+
+  const { text: raw, usage } = await chatCompletionOnce({
+    chat,
+    messages: [
+      { role: "system" as const, content: system },
+      { role: "user" as const, content: userMain },
+    ],
+    maxTokens: Math.min(chat.maxTokens, 1024),
+    temperature: Math.min(chat.temperature, 0.4),
+    signal,
+  });
+
+  const stripped = stripJsonFence(raw);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stripped) as unknown;
+  } catch {
+    return { aliases: [], usage };
+  }
+
+  if (!parsed || typeof parsed !== "object") {
+    return { aliases: [], usage };
+  }
+  const rawAliases = (parsed as Record<string, unknown>).aliases;
+  return { aliases: normalizeAliasCandidates(rawAliases), usage };
+}
+
+function resolvePortraitAliases(opts: {
+  characterName: string;
+  preDiscovered: readonly string[];
+  parsed: PortraitExtractResult;
+}): string[] {
+  const { characterName, preDiscovered, parsed } = opts;
+  let merged = mergeCharacterAliases({
+    displayName: characterName,
+    discovered: [...preDiscovered, ...parsed.aliases],
+  });
+  if (merged.length === 0) {
+    merged = mergeCharacterAliases({
+      displayName: characterName,
+      discovered: extractAliasesFromPortraitFields({
+        displayName: characterName,
+        identity: parsed.identity_zh,
+        bio: parsed.bio_zh,
+        appearance: parsed.appearance_zh,
+        excerptQuotes: parsed.excerpts.map((e) => e.quote),
+      }),
+    });
+  }
+  return merged;
+}
+
 async function callPortraitLlm(opts: {
   chat: AIChatEndpoint;
   characterName: string;
+  aliases: string[];
   retrievalContext: string;
   hits: AIIndexSearchHit[];
   signal?: AbortSignal;
 }): Promise<PortraitExtractResult> {
-  const { chat, characterName, retrievalContext, hits, signal } = opts;
+  const { chat, characterName, aliases, retrievalContext, hits, signal } = opts;
 
   const system = `你是中文小说角色外貌分析与插画描述助手。
 你必须只依据用户给出的「检索片段」总结外貌；不得编造书中未出现的细节。
@@ -307,9 +429,11 @@ async function callPortraitLlm(opts: {
   "age_text": string,
   "identity_zh": string,
   "bio_zh": string,
-  "relations_zh": string
+  "relations_zh": string,
+  "aliases": string[]
 }
 excerpts 每条 quote 为原文节选（可稍缩短）；chapterIndex 从 0 起。
+aliases：书中其它人物对该角色的称呼（绰号、外号、江湖名号、道号等），须与角色名指同一人；不要将门派/组织归属（如「古墓派弟子」）或身份描述当作别名；无依据时填空数组。
 sd_prompt_zh：角色形象的中文自然语言描述（短语或短句，逗号或顿号分隔即可；面向读者编辑，勿写英文 tag）；用于后续文生图，可含外貌、服饰、姿态、光线等。
 negative_zh：可选；一般填空字符串（通用排除项由应用设置提供）。
 gender：依据原文能确定的生理性别；无法判断时用 unknown。
@@ -318,7 +442,12 @@ identity_zh：故事中的组织归属、职业或社会地位；无依据时填
 bio_zh：人物简介（中文，可多条合并为一段）；无额外信息可与 appearance_zh 呼应但勿杜撰。
 relations_zh：主要人物关系（中文）；无依据时填空字符串。`;
 
-  const userMain = `角色名：「${characterName}」
+  const aliasLine =
+    aliases.length > 0
+      ? `\n别名（与角色名指同一人）：${aliases.map((a) => `「${a}」`).join("、")}`
+      : "";
+
+  const userMain = `角色名：「${characterName}」${aliasLine}
 
 以下是本书向量检索得到的片段（可能不完整或含有噪声）：
 
@@ -367,10 +496,30 @@ ${retrievalContext || "（无检索结果）"}
     try {
       parsed = JSON.parse(stripped2) as unknown;
     } catch {
-      return attachTokenUsage(normalizeExtractFromParsed(null, hits), usageAcc);
+      const fallback = normalizeExtractFromParsed(null, hits);
+      return attachTokenUsage(
+        {
+          ...fallback,
+          aliases: resolvePortraitAliases({
+            characterName,
+            preDiscovered: aliases,
+            parsed: fallback,
+          }),
+        },
+        usageAcc,
+      );
     }
   }
-  return attachTokenUsage(normalizeExtractFromParsed(parsed, hits), usageAcc);
+  const parsedResult = normalizeExtractFromParsed(parsed, hits);
+  const resolvedAliases = resolvePortraitAliases({
+    characterName,
+    preDiscovered: aliases,
+    parsed: parsedResult,
+  });
+  return attachTokenUsage(
+    { ...parsedResult, aliases: resolvedAliases },
+    usageAcc,
+  );
 }
 
 export type PortraitTranslateSdArgs = {
@@ -496,6 +645,8 @@ ${negativeZh || "（空）"}
 export type PortraitExtractArgs = {
   bookHash: string;
   characterName: string;
+  /** 用户填写的别名（中英文逗号或竖线分隔） */
+  characterAliases?: string;
   spoilerSafe: boolean;
   activeChapterIdx: number;
   signal?: AbortSignal;
@@ -679,7 +830,51 @@ export async function runCharacterPortraitExtract(
       ? args.activeChapterIdx
       : null;
 
-  const queries = portraitSearchQueries(name);
+  const userAliasesInput = args.characterAliases?.trim() ?? "";
+  const chat = readActiveChatEndpoint(cfg);
+  const usageAcc = { usage: ZERO_TOKEN_USAGE, available: false };
+
+  let discoveredAliases: string[] = [];
+  const aliasDiscoveryQueries = portraitAliasDiscoveryQueries(name);
+  if (aliasDiscoveryQueries.length > 0) {
+    try {
+      const aliasHits = await mergedRagHitsForPortrait({
+        bookHash: args.bookHash.trim(),
+        aiConfig: cfg,
+        queries: aliasDiscoveryQueries,
+        topKPerQuery: Math.min(6, Math.max(1, cfg.ragTopK)),
+        spoilerMaxChapterIndex,
+      });
+      const aliasContext = buildRetrievalContext(
+        aliasHits,
+        MAX_ALIAS_DISCOVERY_CONTEXT,
+      );
+      if (aliasContext) {
+        const discovery = await callAliasDiscoveryLlm({
+          chat,
+          characterName: name,
+          retrievalContext: aliasContext,
+          signal: args.signal,
+        });
+        absorbChatUsage(usageAcc, discovery.usage);
+        discoveredAliases = discovery.aliases;
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/abort|aborted/i.test(msg)) {
+        return { error: msg || "已停止" };
+      }
+      // 别名发现失败不阻断正式检索
+    }
+  }
+
+  const mergedAliases = mergeCharacterAliases({
+    displayName: name,
+    userInput: userAliasesInput,
+    discovered: discoveredAliases,
+  });
+
+  const queries = portraitSearchQueries(name, mergedAliases);
   if (queries.length === 0) return { error: "角色名无效" };
 
   let hits: AIIndexSearchHit[];
@@ -711,13 +906,50 @@ export async function runCharacterPortraitExtract(
   }
 
   try {
-    return await callPortraitLlm({
-      chat: readActiveChatEndpoint(cfg),
+    const portrait = await callPortraitLlm({
+      chat,
       characterName: name,
+      aliases: mergedAliases,
       retrievalContext,
       hits,
       signal: args.signal,
     });
+    let finalAliases = mergeCharacterAliases({
+      displayName: name,
+      userInput: userAliasesInput,
+      discovered: portrait.aliases,
+    });
+    if (finalAliases.length === 0) {
+      try {
+        const supplement = await callAliasDiscoveryLlm({
+          chat,
+          characterName: name,
+          retrievalContext,
+          signal: args.signal,
+        });
+        absorbChatUsage(usageAcc, supplement.usage);
+        finalAliases = mergeCharacterAliases({
+          displayName: name,
+          userInput: userAliasesInput,
+          discovered: supplement.aliases,
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/abort|aborted/i.test(msg)) {
+          return { error: msg || "已停止" };
+        }
+      }
+    }
+    const portraitUsage = portrait.tokenUsage ?? ZERO_TOKEN_USAGE;
+    const combinedUsage = addTokenUsage(usageAcc.usage, portraitUsage);
+    const combinedAvailable =
+      usageAcc.available || Boolean(portrait.tokenUsageAvailable);
+    return {
+      ...portrait,
+      aliases: finalAliases,
+      tokenUsage: combinedUsage,
+      tokenUsageAvailable: combinedAvailable,
+    };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return { error: msg || "生成摘录与 prompt 失败" };

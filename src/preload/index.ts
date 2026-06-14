@@ -698,6 +698,7 @@ const api = {
     portraitExtract: (payload: {
       bookHash: string;
       characterName: string;
+      characterAliases?: string;
       spoilerSafe?: boolean;
       activeChapterIdx?: number;
       /** 与 portraitInferBookStyle、portraitRetrieveAbort 对齐，用于中止本轮检索 */

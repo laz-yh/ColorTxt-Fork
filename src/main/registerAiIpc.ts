@@ -1,14 +1,14 @@
 import { app, dialog, ipcMain, type FileFilter } from "electron";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
-import type {
-  AIAgentStartPayload,
-  AIChunkRecord,
-  AIChatStreamPayload,
-  AIConfig,
-  BookStyleInferResult,
-  PortraitExtractResult,
+import {
   normalizeEmbeddingEndpoint,
+  type AIAgentStartPayload,
+  type AIChunkRecord,
+  type AIChatStreamPayload,
+  type AIConfig,
+  type BookStyleInferResult,
+  type PortraitExtractResult,
 } from "@shared/aiTypes";
 import type { AiTxt2ImgInvokeResult } from "@shared/aiTxt2ImgIpc";
 import {
@@ -67,7 +67,6 @@ import {
 import { deleteBookSegmentCache } from "./ai/rag/segmentCache";
 import { adaptPortraitPromptForBackend } from "./ai/txt2img/promptAdapt";
 import { testTxt2ImgConnection } from "./ai/txt2img/testConnection";
-import { mergeTxt2ImgZhGeneralBeforeSpecific } from "./ai/txt2img/mergeZh";
 import { isTxt2ImgBackend, txt2ImgRequiresApiKey } from "@shared/txt2ImgBackend";
 import {
   appendMessage,
@@ -1169,6 +1168,10 @@ export function registerAiIpcHandlers(): void {
       if (!isRecord(payloadRaw)) return { error: "无效参数" };
       const bookHash = payloadRaw.bookHash;
       const characterName = payloadRaw.characterName;
+      const characterAliases =
+        typeof payloadRaw.characterAliases === "string"
+          ? payloadRaw.characterAliases
+          : undefined;
       const spoilerSafe = payloadRaw.spoilerSafe === true;
       const activeChapterIdx = payloadRaw.activeChapterIdx;
       if (typeof bookHash !== "string" || typeof characterName !== "string") {
@@ -1186,6 +1189,7 @@ export function registerAiIpcHandlers(): void {
       return runCharacterPortraitExtract(c, {
         bookHash,
         characterName,
+        characterAliases,
         spoilerSafe,
         activeChapterIdx: ch,
         signal,

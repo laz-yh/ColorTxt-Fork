@@ -26,6 +26,10 @@ import type {
   CharacterRosterEntry,
 } from "@shared/characterTypes";
 import {
+  formatCharacterAliasesList,
+  mergeCharacterAliases,
+} from "@shared/characterAliases";
+import {
   characterPortraitImageAbs,
   characterPortraitSessionDraftImageAbs,
   characterPortraitTmpImageAbs,
@@ -127,6 +131,7 @@ watch(
 );
 
 const draftDisplayName = ref("");
+const draftAliases = ref("");
 const draftGender = ref<CharacterGender>("unknown");
 const draftAgeText = ref("");
 const draftIdentity = ref("");
@@ -798,6 +803,7 @@ function openAddSlide() {
   portraitEditSessionKey.value = crypto.randomUUID();
   editingId.value = null;
   draftDisplayName.value = "";
+  draftAliases.value = "";
   draftGender.value = "unknown";
   draftAgeText.value = "";
   draftIdentity.value = "";
@@ -825,6 +831,7 @@ function openEditSlide(entry: CharacterRosterEntry) {
   }
   editingId.value = entry.id;
   draftDisplayName.value = entry.displayName;
+  draftAliases.value = entry.aliases ?? "";
   draftGender.value = entry.gender;
   draftAgeText.value = entry.ageText;
   draftIdentity.value = entry.identity;
@@ -960,6 +967,7 @@ function resetCharacterEditDrawerOnBookChange() {
   retrieveNoticeBanner.value = "";
   editingId.value = null;
   draftDisplayName.value = "";
+  draftAliases.value = "";
   draftGender.value = "unknown";
   draftAgeText.value = "";
   draftIdentity.value = "";
@@ -1019,6 +1027,9 @@ function genderFromExtract(
 
 function buildRetrieveThinking(ex: PortraitExtractResult): string {
   const parts: string[] = [];
+  if (ex.aliases?.length) {
+    parts.push(`【别名】\n${formatCharacterAliasesList(ex.aliases)}`);
+  }
   if (ex.confidence_note?.trim()) {
     parts.push(`【可信度】\n${ex.confidence_note.trim()}`);
   }
@@ -1106,6 +1117,7 @@ async function onRetrieve() {
     const res = await window.colorTxt.ai.portraitExtract({
       bookHash: bookHash.value,
       characterName: draftDisplayName.value.trim(),
+      characterAliases: draftAliases.value.trim(),
       spoilerSafe: spoilerSafe.value,
       activeChapterIdx: props.activeChapterIdx,
       retrieveSessionId,
@@ -1125,6 +1137,7 @@ async function onRetrieve() {
     draftIdentity.value = ok.identity_zh.trim();
     draftBio.value = ok.bio_zh.trim();
     draftRelations.value = ok.relations_zh.trim();
+    draftAliases.value = formatCharacterAliasesList(ok.aliases ?? []);
     draftRetrieveThinking.value = buildRetrieveThinking(ok);
     absorbRetrieveTokenUsage(ok);
     retrieveTokenUsageShown.value = true;
@@ -1173,9 +1186,16 @@ function onStopPortraitRetrieve() {
 }
 
 function buildEntryFromDraft(id: string): CharacterRosterEntry {
+  const displayName = draftDisplayName.value.trim();
   return {
     id,
-    displayName: draftDisplayName.value.trim(),
+    displayName,
+    aliases: formatCharacterAliasesList(
+      mergeCharacterAliases({
+        displayName,
+        userInput: draftAliases.value,
+      }),
+    ),
     gender: draftGender.value,
     ageText: draftAgeText.value.trim(),
     identity: draftIdentity.value.trim(),
@@ -1726,6 +1746,20 @@ onBeforeUnmount(() => {
               v-html="icons.warning"
             />
             <span>{{ retrieveNoticeBanner }}</span>
+          </div>
+
+          <div class="field">
+            <span class="label">别名</span>
+            <div :inert="extracting">
+              <input
+                v-model="draftAliases"
+                type="text"
+                class="drawerNameInput"
+                placeholder="逗号分隔"
+                spellcheck="false"
+                :disabled="extracting"
+              />
+            </div>
           </div>
 
           <div class="drawerMainFields" :inert="extracting">

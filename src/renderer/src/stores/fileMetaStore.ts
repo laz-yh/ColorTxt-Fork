@@ -167,6 +167,7 @@ const MAX_STYLE_NOTE_ZH = 4000;
 const MAX_ROSTER_ENTRIES = 200;
 const MAX_CHAR_FIELD = 32000;
 const MAX_DISPLAY_NAME = 200;
+const MAX_ALIASES = 500;
 const MAX_ID_LEN = 64;
 
 function clampStr(s: string, max: number): string {
@@ -222,6 +223,8 @@ function normalizeCharacterRosterEntry(
   return {
     id,
     displayName,
+    aliases:
+      typeof o.aliases === "string" ? clampStr(o.aliases, MAX_ALIASES) : "",
     gender: normalizeCharacterGender(o.gender),
     ageText:
       typeof o.ageText === "string"

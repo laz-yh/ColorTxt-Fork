@@ -13,6 +13,8 @@ export type CharacterBookStylePersisted = {
 export type CharacterRosterEntry = {
   id: string;
   displayName: string;
+  /** 别名，持久化为中文逗号拼接；空字符串表示无 */
+  aliases: string;
   gender: CharacterGender;
   /** 年龄或「少年」等描述；空表示背面不展示年龄 */
   ageText: string;
