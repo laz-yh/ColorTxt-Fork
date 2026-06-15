@@ -108,6 +108,13 @@ const emptyMessage = computed(() => {
             {{ item.text }}
           </span>
           <div class="highlightItemActions">
+            <span
+              v-if="item.matchCount > 0"
+              class="highlightMatchCount"
+              :title="`${item.matchCount} 处匹配`"
+            >
+              {{ item.matchCount }}
+            </span>
             <button
               type="button"
               class="highlightFavoriteBtn"
@@ -238,6 +245,22 @@ const emptyMessage = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: 2px;
+}
+
+.highlightMatchCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--muted-bg, rgba(128,128,128,0.12));
+  flex-shrink: 0;
 }
 
 .highlightFavoriteBtn,

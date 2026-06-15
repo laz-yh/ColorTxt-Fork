@@ -7,6 +7,8 @@ export type HighlightListTerm = {
   /** 已收藏 = 全局词表；未收藏 = 当前文件词表 */
   scope: "global" | "book";
   isFavorited: boolean;
+  /** 当前文件中该词的出现次数 */
+  matchCount: number;
 };
 
 const MAX_HIGHLIGHT_TERM_LEN = 100;
@@ -130,7 +132,7 @@ function expandHighlightMapToListTerms(
     const color = idx < colors.length ? colors[idx]! : bodyText;
     for (const text of terms) {
       if (!text) continue;
-      out.push({ text, color, colorIndex: idx, scope, isFavorited });
+      out.push({ text, color, colorIndex: idx, scope, isFavorited, matchCount: 0 });
     }
   }
   return out;

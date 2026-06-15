@@ -544,12 +544,20 @@ const currentFileHighlightTerms = computed(() => {
     currentTheme.value === "vs"
       ? readerSurfaceLight.value.bodyText
       : readerSurfaceDark.value.bodyText;
-  return buildHighlightListTerms(
+  const raw = buildHighlightListTerms(
     highlightWordsByIndexGlobal.value,
     currentFileHighlightWords.value,
     colors,
     bodyText,
   );
+  /** 统计匹配数 */
+  // 依赖 loading 状态：当文件加载完成（loading 从 true 变 false）时，computed 会自动重新求值
+  void loading.value;
+  const reader = readerRef.value;
+  const model = reader?.getModel?.();
+  if (!reader?.countHighlightTermMatches || !model) return raw;
+  const result = reader.countHighlightTermMatches(raw, model);
+  return result;
 });
 
 const readerPaneWrapRef = useTemplateRef<HTMLElement>("readerPaneWrapRef");

@@ -2060,7 +2060,24 @@ defineExpose({
   applyEbookInternalLinkMarkers,
   getEbookLeadingLinkLabelsByDisplayLine,
   getReaderEditorDomNode: () => editor.value?.getDomNode() ?? null,
+  getModel: () => model.value ?? null,
+  countHighlightTermMatches,
 });
+
+/** 统计高亮词匹配数 */
+function countHighlightTermMatches(
+  terms: import("../utils/highlightWords").HighlightListTerm[],
+  m?: monaco.editor.ITextModel | null,
+) {
+  const modelToUse = m ?? model.value;
+  if (!modelToUse) return terms.map((t) => ({ ...t, matchCount: 0 }));
+  return terms.map((t) => {
+    const q = t.text.trim();
+    if (!q) return { ...t, matchCount: 0 };
+    const matches = modelToUse.findMatches(q, false, false, false, null, false);
+    return { ...t, matchCount: matches?.length ?? 0 };
+  });
+}
 
 function applyReaderSyntaxFromProps() {
   setReaderSyntaxHighlightEnabled(
