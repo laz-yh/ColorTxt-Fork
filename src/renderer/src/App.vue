@@ -1923,6 +1923,23 @@ watch(readerEditMode, (edit) => {
 watch(currentFile, (next, prev) => {
   if (next === prev) return;
   clearSidebarSearchState();
+  /** 打开文件时从 meta 恢复侧栏标签页 */
+  const meta = findFileMetaRecord(fileMetaRecords.value, next);
+  if (meta?.sidebarTab) {
+    sidebarTab.value = meta.sidebarTab;
+  }
+});
+
+/** 侧栏标签页切换时保存到当前文件的 meta */
+watch(sidebarTab, () => {
+  const path = currentFile.value;
+  if (!path) return;
+  fileMetaRecords.value = upsertFileMetaRecord(
+    fileMetaRecords.value,
+    path,
+    (record) => ({ ...record, sidebarTab: sidebarTab.value }),
+  );
+  persistFileMeta();
 });
 
 function onJumpToSearchResult(item: SidebarSearchResult) {
