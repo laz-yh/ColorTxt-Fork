@@ -539,6 +539,8 @@ const mergedHighlightWordsForReader = computed(() =>
 );
 
 const currentFileHighlightTerms = computed(() => {
+  /** 依赖 loading：文件加载完成（loading 变 false）时 computed 自动重新计算 */
+  void loading.value;
   const colors = highlightColorsForReader.value;
   const bodyText =
     currentTheme.value === "vs"
@@ -550,14 +552,7 @@ const currentFileHighlightTerms = computed(() => {
     colors,
     bodyText,
   );
-  /** 统计匹配数 */
-  // 依赖 loading 状态：当文件加载完成（loading 从 true 变 false）时，computed 会自动重新求值
-  void loading.value;
-  const reader = readerRef.value;
-  const model = reader?.getModel?.();
-  if (!reader?.countHighlightTermMatches || !model) return raw;
-  const result = reader.countHighlightTermMatches(raw, model);
-  return result;
+  return readerRef.value?.countHighlightTermMatches(raw) ?? raw;
 });
 
 const readerPaneWrapRef = useTemplateRef<HTMLElement>("readerPaneWrapRef");
