@@ -23,6 +23,8 @@ defineEmits<{
   "update:draftChapterMinCharCount": [v: number];
   "update:draftEbookConvertOutputDir": [v: string];
   clearCache: [];
+  exportConfig: [];
+  importConfig: [];
 }>();
 </script>
 
@@ -125,6 +127,40 @@ defineEmits<{
       </div>
       <p class="settingsHint">清除本地缓存数据（不影响界面相关的设置）。</p>
     </div>
+
+    <div class="settingsRow settingsRow--data">
+      <div class="settingsRowMain">
+        <span class="settingsLabel">导出配置</span>
+        <button
+          class="btn"
+          type="button"
+          size="large"
+          @click="$emit('exportConfig')"
+        >
+          导出配置
+        </button>
+      </div>
+      <p class="settingsHint">
+        将所有本地配置导出为 JSON 文件（含界面设置、阅读进度、书签、高亮词等），可保存到任意位置。
+      </p>
+    </div>
+
+    <div class="settingsRow settingsRow--data">
+      <div class="settingsRowMain">
+        <span class="settingsLabel">导入配置</span>
+        <button
+          class="btn"
+          type="button"
+          size="large"
+          @click="$emit('importConfig')"
+        >
+          导入配置
+        </button>
+      </div>
+      <p class="settingsHint">
+        从 JSON 文件导入配置，将覆盖当前 localStorage 中 ColorTxt 的所有本地数据。
+      </p>
+    </div>
   </div>
 </template>
 
@@ -144,6 +180,12 @@ defineEmits<{
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.settingsRow--cache,
+.settingsRow--data {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
 }
 
 .settingsRowMain {

@@ -47,6 +47,7 @@ import {
   maxLineHeightMultipleForFontSize,
   persistKey,
   skipUnloadPersistenceSessionKey,
+  skipSettingsPersistenceSessionKey,
   APP_DISPLAY_NAME,
 } from "../constants/appUi";
 import { appAlert } from "../services/appDialog";
@@ -519,6 +520,105 @@ async function onClearCache() {
   }
   window.location.reload();
 }
+
+/** 导出所有 localStorage 中 ColorTxt 的数据为 JSON 文件 */
+async function onExportConfig(): Promise<void> {
+  if (!window.colorTxt) return;
+
+  const data: Record<string, string> = {};
+  for (let i = 0; i < window.localStorage.length; i++) {
+    const key = window.localStorage.key(i);
+    if (key && key.startsWith("colorTxt")) {
+      data[key] = window.localStorage.getItem(key) ?? "";
+    }
+  }
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const defaultName = `colortxt-config-${timestamp}.json`;
+
+  const result = await window.colorTxt.showSaveDialog({
+    title: "导出 ColorTxt 配置",
+    defaultPath: defaultName,
+    filters: [
+      { name: "JSON", extensions: ["json"] },
+      { name: "All Files", extensions: ["*"] },
+    ],
+  });
+
+  if (result.canceled || !result.filePath) return;
+
+  try {
+    const jsonStr = JSON.stringify(data, null, 2);
+    await window.colorTxt.writeUtf8File(result.filePath, jsonStr);
+    await window.colorTxt.alert(`配置已导出到：${result.filePath}`);
+  } catch (err) {
+    await window.colorTxt.alert(`导出失败：${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/** 从 JSON 文件导入 localStorage 数据 */
+async function onImportConfig(): Promise<void> {
+  if (!window.colorTxt) return;
+
+  const result = await window.colorTxt.showOpenDialog({
+    title: "导入 ColorTxt 配置",
+    filters: [
+      { name: "JSON", extensions: ["json"] },
+      { name: "All Files", extensions: ["*"] },
+    ],
+    properties: ["openFile"],
+  });
+
+  if (result.canceled || result.filePaths.length === 0) return;
+
+  const filePath = result.filePaths[0];
+
+  // 确认覆盖
+  const r = await window.colorTxt.showMessageBox({
+    type: "warning",
+    title: APP_DISPLAY_NAME,
+    buttons: ["取消", "确认导入"],
+    defaultId: 1,
+    cancelId: 0,
+    message: "导入将覆盖当前所有本地配置数据",
+    detail: `确认从以下文件导入配置？\n${filePath}`,
+    noLink: true,
+  });
+  if (r.response !== 1) return;
+
+  try {
+    const content = await window.colorTxt.readWholeTextFile(filePath);
+    if (!content.ok) {
+      await window.colorTxt.alert(`读取文件失败：${content.message}`);
+      return;
+    }
+
+    const data: Record<string, string> = JSON.parse(content.text);
+    const keys: string[] = [];
+    for (const [key, value] of Object.entries(data)) {
+      if (typeof key === "string" && key.startsWith("colorTxt")) {
+        window.localStorage.setItem(key, value);
+        keys.push(key);
+      }
+    }
+
+    if (keys.length === 0) {
+      await window.colorTxt.alert("文件中未找到 ColorTxt 配置数据（无 colorTxt 前缀的 key）。");
+      return;
+    }
+
+    await window.colorTxt.alert(`已导入 ${keys.length} 项配置。`);
+    try {
+      sessionStorage.setItem(skipUnloadPersistenceSessionKey, "1");
+      sessionStorage.setItem(skipSettingsPersistenceSessionKey, "1");
+    } catch {
+      // ignore
+    }
+    window.location.reload();
+  } catch (err) {
+    await window.colorTxt.alert(`导入失败：${err instanceof Error ? err.message : String(err)}`);
+  }
+}
 </script>
 
 <template>
@@ -550,6 +650,8 @@ async function onClearCache() {
                 draftEbookConvertOutputDir
               "
               @clear-cache="onClearCache"
+              @export-config="onExportConfig"
+              @import-config="onImportConfig"
             />
 
             <SettingsReadingPanel
