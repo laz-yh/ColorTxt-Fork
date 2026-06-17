@@ -120,7 +120,7 @@
       "artifactName": "${name}-${version}-${arch}.${ext}",
       "publish": {
         "provider": "github",
-        "owner": "ssnangua",
+        "owner": "laz-yh",
         "repo": "ColorTxt",
         "channel": "latest-${arch}"
       },
@@ -149,7 +149,7 @@
       "artifactName": "${name}-${version}-${arch}.${ext}",
       "publish": {
         "provider": "github",
-        "owner": "ssnangua",
+        "owner": "laz-yh",
         "repo": "ColorTxt",
         "channel": "latest-${arch}"
       },
@@ -159,7 +159,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "ssnangua",
+      "owner": "laz-yh",
       "repo": "ColorTxt"
     }
   }
