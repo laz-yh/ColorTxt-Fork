@@ -13,7 +13,7 @@ const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8")) as {
   build?: { productName?: string };
 };
 
-const DEFAULT_GITHUB_REPO_URL = "https://github.com/laz-yh/ColorTxt";
+const DEFAULT_GITHUB_REPO_URL = "https://github.com/laz-yh/ColorTxt-Fork";
 
 function readPackageGithubRepoUrl(): string {
   const hp =
