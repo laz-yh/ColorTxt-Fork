@@ -2375,6 +2375,20 @@ const inlineSearch = useReaderInlineSearch({
   beginProgrammaticScroll,
   monacoScrollType,
   suppressHighlightTipForProgrammaticSelection,
+  onClearAllDecorations: () => {
+    /** 清除所有装饰器（包括 Ctrl+F 的） */
+    const e = editor.value;
+    if (!e) return;
+    /** 调用 Monaco 内部方法清除 Ctrl+F 的装饰器 */
+    const findCtrl = e.getContribution("editor.contrib.findController") as {
+      closeFindWidget?: () => void;
+    } | null;
+    if (findCtrl?.closeFindWidget) {
+      findCtrl.closeFindWidget();
+    } else {
+      e.getAction("closeFindWidget")?.run();
+    }
+  },
 });
 
 /**
@@ -2597,12 +2611,15 @@ function toggleFindWidget() {
   const revealed = findCtrl?.getState?.().isRevealed === true;
   e.focus();
   if (revealed) {
+    /** Ctrl+F 关闭：不自动恢复内联搜索装饰器 */
     if (findCtrl?.closeFindWidget) {
       findCtrl.closeFindWidget();
       return;
     }
     e.getAction("closeFindWidget")?.run();
   } else {
+    /** Ctrl+F 打开：清除并禁用内联搜索装饰器，避免颜色共存冲突 */
+    inlineSearch.clearInlineSearchDecorations();
     props.beforeRevealFindWidget?.();
     e.getAction("actions.find")?.run();
   }

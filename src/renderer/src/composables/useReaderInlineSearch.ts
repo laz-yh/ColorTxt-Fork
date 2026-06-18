@@ -10,12 +10,16 @@ export function useReaderInlineSearch(deps: {
   beginProgrammaticScroll: () => void;
   monacoScrollType: (smooth: boolean) => monaco.editor.ScrollType;
   suppressHighlightTipForProgrammaticSelection: () => void;
+  /** 清除所有装饰器（包括 Ctrl+F 的） */
+  onClearAllDecorations?: () => void;
 }) {
   let inlineSearchQuery = "";
   let inlineSearchCaseSensitive = false;
   let inlineSearchWholeWord = false;
   let inlineSearchUseRegex = false;
   let inlineSearchCurrentMatch: MatchShape | null = null;
+  /** Ctrl+F 打开时关闭内联搜索装饰器，需要时才恢复 */
+  let inlineSearchDecorationsDisabled = false;
 
   function isWordChar(ch: string): boolean {
     return /[0-9A-Za-z_]/.test(ch);
@@ -63,6 +67,7 @@ export function useReaderInlineSearch(deps: {
     const m = deps.model.value;
     const collection = deps.inlineSearchDecorationsCollection.value;
     if (!m || !collection) return;
+    if (inlineSearchDecorationsDisabled) return;
     const query = inlineSearchQuery.trim();
     if (!query) {
       collection.clear();
@@ -89,6 +94,11 @@ export function useReaderInlineSearch(deps: {
             idx === currentMatchIndex
               ? "readerInlineSearchCurrentMatch"
               : "readerInlineSearchMatch",
+          /** 在概览尺/滚动条上显示匹配位置指示条，颜色同 Ctrl+F */
+          overviewRuler: {
+            color: idx === currentMatchIndex ? "#f7dc6f" : "#a8ac94",
+            position: monaco.editor.OverviewRulerLane.Center,
+          },
         },
       }),
     );
@@ -150,6 +160,12 @@ export function useReaderInlineSearch(deps: {
     deps.inlineSearchDecorationsCollection.value?.clear();
   }
 
+  /** 仅清除装饰器并禁用（用于 Ctrl+F 打开时避免颜色共存） */
+  function clearInlineSearchDecorations() {
+    inlineSearchDecorationsDisabled = true;
+    deps.inlineSearchDecorationsCollection.value?.clear();
+  }
+
   function jumpToSearchMatchCentered(
     lineNumber: number,
     startColumn: number,
@@ -205,6 +221,8 @@ export function useReaderInlineSearch(deps: {
       clearInlineSearchState();
       return false;
     }
+    /** 启用内联搜索装饰器（用户主动点击高亮词） */
+    inlineSearchDecorationsDisabled = false;
     inlineSearchQuery = q;
     inlineSearchCaseSensitive = options?.caseSensitive === true;
     inlineSearchWholeWord = options?.wholeWord === true;
@@ -228,6 +246,9 @@ export function useReaderInlineSearch(deps: {
       startColumn: target.startColumn,
       endColumn: target.endColumn,
     };
+    /** 先清除内联搜索装饰器确保干净 */
+    deps.inlineSearchDecorationsCollection.value?.clear();
+    deps.onClearAllDecorations?.();
     applyInlineSearchDecorations();
     jumpToSearchMatchCentered(
       target.startLineNumber,
@@ -246,6 +267,7 @@ export function useReaderInlineSearch(deps: {
     applyInlineSearchDecorations,
     setInlineSearchState,
     clearInlineSearchState,
+    clearInlineSearchDecorations,
     jumpToSearchMatchCentered,
     jumpToNextInlineSearchMatch,
     hasInlineSearchQuery,
