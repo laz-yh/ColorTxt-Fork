@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 import type { VoiceReadEngineConfig } from "@shared/voiceReadEngineConfig";
@@ -23,6 +23,19 @@ const MIMO_API_ROOT = MIMO_API_BASE_URL.replace(/\/$/, "");
 const MIMO_TTS_URL = `${MIMO_API_ROOT}/chat/completions`;
 const MIMO_MODELS_URL = `${MIMO_API_ROOT}/models`;
 const MAX_REFERENCE_AUDIO_BYTES = 10 * 1024 * 1024;
+
+type ReferenceAudioDataUrlCacheEntry = {
+  dataUrl: string;
+  mtimeMs: number;
+  size: number;
+};
+
+/** 按绝对路径缓存参考音 data URL；文件 mtime/size 变化时失效 */
+const referenceAudioDataUrlCache = new Map<
+  string,
+  ReferenceAudioDataUrlCacheEntry
+>();
+const referenceAudioDataUrlInflight = new Map<string, Promise<string>>();
 
 function requireMimoApiKey(config: VoiceReadEngineConfig): string {
   const apiKey = config.mimoApiKey?.trim();
@@ -80,15 +93,49 @@ async function readReferenceAudioDataUrl(
   filePath: string,
 ): Promise<string> {
   const resolved = path.resolve(filePath.trim());
-  const buf = await readFile(resolved);
-  if (buf.byteLength === 0) {
-    throw new Error("参考音频文件为空");
+
+  let fileStat;
+  try {
+    fileStat = await stat(resolved);
+  } catch {
+    referenceAudioDataUrlCache.delete(resolved);
+    throw new Error("无法读取参考音频文件");
   }
-  if (buf.byteLength > MAX_REFERENCE_AUDIO_BYTES) {
-    throw new Error("参考音频文件过大（Base64 编码后不得超过 10 MB）");
+
+  const cached = referenceAudioDataUrlCache.get(resolved);
+  if (
+    cached &&
+    cached.mtimeMs === fileStat.mtimeMs &&
+    cached.size === fileStat.size
+  ) {
+    return cached.dataUrl;
   }
-  const mime = mimeTypeForReferenceAudio(resolved);
-  return `data:${mime};base64,${buf.toString("base64")}`;
+
+  const inflight = referenceAudioDataUrlInflight.get(resolved);
+  if (inflight) return inflight;
+
+  const request = (async () => {
+    const buf = await readFile(resolved);
+    if (buf.byteLength === 0) {
+      throw new Error("参考音频文件为空");
+    }
+    if (buf.byteLength > MAX_REFERENCE_AUDIO_BYTES) {
+      throw new Error("参考音频文件过大（Base64 编码后不得超过 10 MB）");
+    }
+    const mime = mimeTypeForReferenceAudio(resolved);
+    const dataUrl = `data:${mime};base64,${buf.toString("base64")}`;
+    referenceAudioDataUrlCache.set(resolved, {
+      dataUrl,
+      mtimeMs: fileStat.mtimeMs,
+      size: fileStat.size,
+    });
+    return dataUrl;
+  })().finally(() => {
+    referenceAudioDataUrlInflight.delete(resolved);
+  });
+
+  referenceAudioDataUrlInflight.set(resolved, request);
+  return request;
 }
 
 function parseMimoAudio(body: unknown): ArrayBuffer | null {

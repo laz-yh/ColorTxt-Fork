@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import AppCheckbox from "./AppCheckbox.vue";
 import ApiEndpointInput from "./ApiEndpointInput.vue";
 import AppCustomSelect, { type CustomSelectItem } from "./AppCustomSelect.vue";
@@ -742,9 +742,14 @@ function initVoiceReadProfiles() {
 }
 
 defineExpose({
+  cancelPreview,
   finalizeVoiceReadProfiles: voiceReadProfileDraft.finalizeBeforeSave,
   initVoiceReadProfiles,
   resetCurrentVoiceReadProfile: voiceReadProfileDraft.resetCurrentProfileSettings,
+});
+
+onUnmounted(() => {
+  cancelPreview();
 });
 </script>
 

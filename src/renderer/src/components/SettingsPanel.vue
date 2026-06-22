@@ -68,6 +68,7 @@ import type { VoiceReadProfile } from "@shared/voiceReadProfiles";
 import { migrateVoiceReadFromPersisted, cloneVoiceReadProfiles } from "../services/voiceRead/voiceReadProfileState";
 
 type SettingsVoiceReadPanelExpose = {
+  cancelPreview?: () => void;
   finalizeVoiceReadProfiles?: () => void;
   initVoiceReadProfiles?: () => void;
   resetCurrentVoiceReadProfile?: () => void;
@@ -264,6 +265,7 @@ async function syncAiFromMain() {
 
 watch(modelValue, (open) => {
   if (!open) {
+    voiceReadPanelRef.value?.cancelPreview?.();
     activeTab.value = "general";
     return;
   }
@@ -283,7 +285,10 @@ watch(draftFontSize, (fs) => {
   }
 });
 
-watch(activeTab, () => {
+watch(activeTab, (tab, prev) => {
+  if (prev === "voiceRead" && tab !== "voiceRead") {
+    voiceReadPanelRef.value?.cancelPreview?.();
+  }
   void nextTick(() => {
     const el = settingsTabScrollerEl.value;
     if (el) el.scrollTop = 0;
