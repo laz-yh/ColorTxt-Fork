@@ -247,16 +247,10 @@ const api = {
         available: boolean;
         backend: "safeStorage" | "appBound" | "unavailable";
       }>,
-    getVoiceReadDashScopeApiKey: () =>
-      ipcRenderer.invoke("secrets:getVoiceReadDashScopeApiKey") as Promise<{
-        ok: true;
-        apiKey: string;
-      }>,
-    setVoiceReadDashScopeApiKey: (apiKey: string) =>
-      ipcRenderer.invoke(
-        "secrets:setVoiceReadDashScopeApiKey",
-        apiKey,
-      ) as Promise<{ ok: true }>,
+    getDeprecated: (slot: string) =>
+      ipcRenderer.invoke("secrets:getDeprecated", slot) as Promise<
+        { ok: true; value: string } | { ok: false; error: string }
+      >,
     getVoiceReadProfileKeys: () =>
       ipcRenderer
         .invoke("secrets:get", SECRET_SLOT_VOICE_READ_PROFILE_KEYS)
@@ -272,6 +266,11 @@ const api = {
         slot: SECRET_SLOT_VOICE_READ_PROFILE_KEYS,
         value: keysBlob,
       }) as Promise<{ ok: true }>,
+    setVoiceReadSecrets: (payload: { profileKeys: string }) =>
+      ipcRenderer.invoke(
+        "secrets:setVoiceReadSecrets",
+        payload,
+      ) as Promise<{ ok: true } | { ok: false; error: string }>,
   },
   pathToFileUrl: (filePath: string) =>
     ipcRenderer.invoke("path:toFileUrl", filePath) as Promise<string | null>,

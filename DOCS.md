@@ -217,8 +217,10 @@ src/
 │   ├── textConvertOpenCc.ts  # OpenCC 主进程封装（createRequire、词典路径）
 │   ├── detectTextEncoding.ts # 文本文件编码探测（BOM / jschardet / 中文 ANSI 启发式）
 │   ├── registerAiIpc.ts      # `ai:*` IPC 集中注册
+│   ├── registerSecretsIpc.ts # 语音朗读方案密钥 IPC（`secrets:*`）
+│   ├── secretStorage.ts      # `userData/ai/secrets.v1.json` 加密读写（串行队列 + 原子落盘）
 │   ├── ai/                   # AI 相关主进程模块（按域分子目录，见下文「`src/main/ai/`」）
-│   │   ├── infra/            # config、paths、dataFs、openAiCompatModelList
+│   │   ├── infra/            # config、paths、dataFs、openAiCompatModelList（密钥经 secretStorage，不写 config 明文）
 │   │   ├── shared/           # sleep 等跨域小工具
 │   │   ├── chat/             # chat、agent、thinking、requestRetry、textFormatCleanup
 │   │   ├── rag/              # vectorDb、segmentCache、jieba、embedding/、ragChapterDigest …
@@ -267,7 +269,7 @@ src/
 │       │   ├── useAppChapterNavigation.ts # 章节跳转与规则联动
 │       │   ├── useAppFileSession.ts       # 打开/目录/会话与流管道
 │       │   ├── useAppFullscreenReaderLayout.ts # 全屏正文宽度与空白区交互
-│       │   ├── useAppPersistence.ts       # 设置、会话、列表、meta 持久化
+│       │   ├── useAppPersistence.ts       # 设置、会话、列表、meta 持久化；语音密钥仅在设置确定/启动迁移时写保险库
 │       │   ├── useAppReaderChrome.ts      # 全屏顶/底/侧栏悬停与宽度
 │       │   ├── useAppReaderUiPrefs.ts     # 阅读偏好与 Monaco 同步
 │       │   ├── useAppReadingProgress.ts   # 阅读进度展示模型
@@ -424,7 +426,7 @@ src/
 └── shared/
     ├── packageDerived.ts           # 从 package 派生的共享元数据
     ├── voiceReadEngines.ts       # 引擎注册表（edge / system / dashscope / minimax / mimo）
-    ├── voiceReadProfiles.ts      # 朗读方案、单/多音色设置、方案密钥槽（含 emotionEnabled）
+    ├── voiceReadProfiles.ts      # 朗读方案、单/多音色设置；磁盘剥密钥（`stripVoiceReadSettingsApiKeysForDisk`）
     ├── voiceReadEngineConfig.ts  # 各引擎 API 密钥与模型字段（通义 / MiniMax / MiMo 分开）
     ├── voiceReadSynthesis.ts     # 合成请求/结果与音色选项类型
     ├── voiceReadSynthesisIpc.ts  # `voiceRead:synthesize` / `listVoices` / `healthCheck`
@@ -439,7 +441,8 @@ src/
     ├── builtinEmbeddingModels.ts   # 内置嵌入模型目录（BGE / E5）、HF 镜像默认值
     ├── builtinEmbeddingIpc.ts      # 内置嵌入 IPC 载荷（模型 id + 配置快照）
     ├── apiEndpointPresets.ts       # 对话/文生图服务商预设（含 MiniMax、小米 MiMo、Agnes AI 等）；`applyOpenAiCompatAuthHeaders`
-    ├── aiEndpointProfiles.ts       # 对话/文生图多套配置方案（chatProfiles / txt2imgProfiles）
+    ├── aiEndpointProfiles.ts       # 对话/文生图多套配置方案（chatProfiles / txt2imgProfiles）；profile 密钥映射与孤儿回收
+    ├── secretSlots.ts              # 密钥保险库 slot 名（`@shared/secretSlots`）
     ├── aiSystemPromptPresets.ts    # 附加系统提示词内置预设（虚构文学分析等）
     ├── aiTokenUsage.ts             # usage 解析、缓存命中、花费估算与展示文案
     ├── aiTxt2ImgIpc.ts             # 文生图 IPC 载荷类型
@@ -483,7 +486,7 @@ src/
 
 ##### `src/main/ai/`（AI 模块）
 
-- **`infra/`**：**`paths.ts`**（数据/模型缓存根、向量库与 segment 库路径）、**`dataFs.ts`**（缓存目录迁移与旧版布局升级）、**`config.ts`**（`config.json` 读写与密钥槽合并）、**`openAiCompatModelList.ts`**（`GET /models` 拉取模型 id；认证经 **`applyOpenAiCompatAuthHeaders`**，对话与文生图测试连接共用）。
+- **`infra/`**：**`paths.ts`**（数据/模型缓存根、向量库与 segment 库路径）、**`dataFs.ts`**（缓存目录迁移与旧版布局升级）、**`config.ts`**（`config.json` 读写；API 密钥经 **`secretStorage`** 写入 **`secrets.v1.json`** 的 `*ProfileKeys`，config 不含明文 Key）、**`openAiCompatModelList.ts`**（`GET /models` 拉取模型 id；认证经 **`applyOpenAiCompatAuthHeaders`**，对话与文生图测试连接共用）。
 - **`shared/`**：**`sleep.ts`**（可中断 sleep；`chat/requestRetry` 与文生图轮询共用）。
 - **`chat/`**：**`chat.ts`**（OpenAI 兼容流式对话）、**`chatThinking.ts`**（深度思考参数与流式推理 delta）、**`agentChat.ts`** / **`agentTools.ts`**（Agent 工具循环与 `ai:agent:event`）、**`requestRetry.ts`**（可重试 AI 请求）、**`textFormatCleanup.ts`**（智能排版单段 LLM 清理；`ai:text-format:*` IPC）。
 - **`rag/`**：**`vectorDb.ts`**（SQLite + sqlite-vec）、**`embedding/index.ts`**（远程 `/embeddings` 与内置分支）、**`embedding/localBackend.ts`** + **`embedding/worker.ts`**（Transformers.js Worker；打包入口 **`ai/rag/embedding/worker`**）、**`segmentCache.ts`** / **`jieba.ts`**（词云分词缓存）、**`bookHash.ts`**、**`ragChapterDigest.ts`**（超长章压缩提要）、**`chapterPlainTextBridge.ts`**（向渲染进程索取章文）、**`resolveSqliteVecPath.ts`**（sqlite-vec 原生扩展路径）。
@@ -1566,10 +1569,10 @@ Monaco **0.55+** 移除了 VS Code [#272244](https://github.com/microsoft/vscode
 | 当前方案 | 下拉选中项为编辑对象；点设置 **确定** 后写入 **`activeChatProfileId`** / **`activeTxt2ImgProfileId`**，并同步到运行时 **`cfg.chat`** / **`cfg.txt2img`** 快照 |
 | 方案内容 | 对话方案含完整 **`AIChatEndpoint`**（含 **`systemPromptExtra`**、Token 单价等）；文生图方案含完整 **`AITxt2ImgConfig`**（含 **`enabled`**、后端、密钥、采样/尺寸/Comfy 工作流等） |
 | 不随方案变 | 向量模型、RAG 切块、快速提问、数据缓存目录、立绘缓存根目录、技能、语音朗读等仍为全局项 |
-| API 密钥 | 各方案密钥加密存于 **`SECRET_SLOT_AI_CHAT_PROFILE_KEYS`** / **`SECRET_SLOT_AI_TXT2IMG_PROFILE_KEYS`**（JSON 映射）；活跃方案密钥同时写入旧槽 **`ai.chat.apiKey`** / **`ai.txt2img.apiKey`** 以兼容现有读取路径 |
+| API 密钥 | 各方案密钥加密存于 **`ai.chatProfileKeys`** / **`ai.txt2imgProfileKeys`**（JSON：`profileId → apiKey`）。**设置 → 确定** 时经 **`ai:config:set`** → **`saveAiConfig`** 落盘；关窗 **`persistSettings()`** **不写**保险库。启动时 **`hydrateApiKeysFromVault`** 从保险库灌回内存，并将已废弃旧槽（见下节）一次性迁入 profile 映射后删除 |
 | 侧栏 | 无方案切换 UI；设置保存后 **`aiAssistantConfigSyncNonce`** 递增，阅读助手重新拉取对话模型列表 |
 
-实现见 **`@shared/aiEndpointProfiles`**、**`aiConfig.ts`**（载入时旧版单套配置自动迁移为名为「默认」的首套方案）。
+实现见 **`@shared/aiEndpointProfiles`**、**`@shared/secretSlots`**、**`ai/infra/config.ts`**、**`secretStorage.ts`**（载入时旧版单套配置自动迁移为「默认」方案；旧单密钥 slot 仅读一次）。
 
 ### 对话模型服务商
 
@@ -1625,7 +1628,7 @@ Monaco **0.55+** 移除了 VS Code [#272244](https://github.com/microsoft/vscode
 
 - **A1111**：主进程调用 WebUI **`/sdapi/v1/*`**（如 txt2img、采样器与 SD 模型列表）；设置页可拉取采样器 / 模型 / 高清修复放大算法；**尺寸**为宽高数字输入（默认 **512×768**）。
 - **ComfyUI**：经 **`/prompt`** 提交工作流并轮询 **`/history`**；需在设置中粘贴 **Comfy 工作流 JSON**（导出 API 格式）；尺寸同为自定义宽高。
-- **云端（除自定义兼容代理外）**：`txt2img.apiKey` 经 **`SECRET_SLOT_AI_TXT2IMG_API_KEY`** 加密保存（与语音朗读、AI 阅读助手、MiniMax 对话等密钥在应用内**分开保存**）。出图前由对话模型将 **画风 + 角色形象** 整理为自然语言 prompt（**`natural`** 族）或 SD tag（**`sd`** 族，含 Stability）。**尺寸**为各后端**固定档位**（**`txt2ImgCloudSizePresets`**）；切换服务商时写入该后端 **默认云端模型**（**`txt2ImgCloudModelPresets`** / **`TXT2IMG_DEFAULT_CLOUD_MODEL`**），并按 **512×768** 参考比例选取档位（在比例足够接近的候选中选 **像素最少**，利于立绘省额度）。
+- **云端（除自定义兼容代理外）**：各方案 **`txt2img.apiKey`** 经 **`ai.txt2imgProfileKeys`** 加密保存（与语音朗读、AI 阅读助手等密钥在应用内**分开保存**，见 **「API 密钥保险库」**）。出图前由对话模型将 **画风 + 角色形象** 整理为自然语言 prompt（**`natural`** 族）或 SD tag（**`sd`** 族，含 Stability）。**尺寸**为各后端**固定档位**（**`txt2ImgCloudSizePresets`**）；切换服务商时写入该后端 **默认云端模型**（**`txt2ImgCloudModelPresets`** / **`TXT2IMG_DEFAULT_CLOUD_MODEL`**），并按 **512×768** 参考比例选取档位（在比例足够接近的候选中选 **像素最少**，利于立绘省额度）。
 - **自定义 OpenAI 兼容 Images**（`openai_compat_images`）：走 **`ai/txt2img/openAI.ts`**（标准 OpenAI Images：`response_format: b64_json`、可选 `quality`）；**尺寸为自由宽高 64–2048**（与本地 WebUI 相同 UI），便于对接未知网关（如仅支持非 OpenAI 官方分辨率的代理）。
 - **MiniMax**（`minimax_images`）：专用 **`ai/txt2img/minimax.ts`**，`POST …/v1/image_generation`，按宽高推导 **`aspect_ratio`**；默认模型 **`image-01`**；测试连接走 **`GET …/v1/models`**（不出图）。
 - **Agnes AI**（`agnes_images`）：专用 **`ai/txt2img/agnes.ts`**，仍走 `POST …/images/generations`，但文生图 Base64 用顶层 **`return_base64: true`**（**勿**发顶层 `response_format`，与 OpenAI 官方不同）；默认模型 **`agnes-image-2.1-flash`**；固定尺寸档含 **1024×768** 等（见 **`txt2ImgCloudSizePresets`**）。API Key 控制台：**`AGNES_API_KEY_CONSOLE_URL`**。
@@ -1717,7 +1720,7 @@ cardShellWrap（悬停抬高 z-index）
 #### AI 数据缓存目录（`aiDataCacheDir`）
 
 - **设置位置**：**设置 → AI 阅读助手 → 数据缓存目录**（**`AIConfig.aiDataCacheDir`**，空串表示默认 **`{userData}/ai/data`**）。
-- **目录内容**：**`config.json`**（AI 各子项配置，不含 API Key 明文）、**`vector.sqlite`**（及 WAL/SHM，含分块向量、按书的 Agent 会话与消息）、**`segment.sqlite`**（及 WAL/SHM，词云按章分词词频缓存）、引导文件 **`userData/ai/data-cache-root.json`** 记录当前生效根路径。
+- **目录内容**：**`config.json`**（AI 各子项配置，不含 API Key 明文；密钥在 **`userData/ai/secrets.v1.json`**，不随数据缓存目录迁移）、**`vector.sqlite`**（及 WAL/SHM，含分块向量、按书的 Agent 会话与消息）、**`segment.sqlite`**（及 WAL/SHM，词云按章分词词频缓存）；引导文件 **`userData/ai/data-cache-root.json`** 记录当前生效根路径。
 - **旧版升级**：首次启动时若仍存在 **`userData/ai/config.json`** 或旧 **`vector.sqlite`**，主进程 **`upgradeLegacyAiDataLayoutIfNeeded`** 自动迁入 **`ai/data`** 并写 bootstrap。
 - **变更目录**：设置里修改数据缓存目录并 **确定** 时，**`SettingsPanel`** 提示确认后调用 **`window.colorTxt.ai.migrateDataCacheRoot`**（关闭向量库连接后合并迁移 `config.json` 与 `vector.sqlite*`）。
 
@@ -1816,10 +1819,42 @@ cardShellWrap（悬停抬高 z-index）
 | 路径 / 目录 | 说明 |
 | ----------- | ---- |
 | `ai/data/`（默认数据缓存根） | **`config.json`**、**`vector.sqlite`**（+ WAL/SHM）、**`segment.sqlite`**（+ WAL/SHM，词云分词缓存）；实际根目录取 **`aiDataCacheDir`** 或 **`data-cache-root.json`** |
+| `ai/secrets.v1.json` | **API 密钥保险库**（与 `config.json` 分离；不含聊天正文）。见下节 **「API 密钥保险库」** |
 | `ai/data-cache-root.json` | 记录当前生效的 AI 数据缓存绝对路径（`aiDataFs`） |
 | `ai/model-cache/`（默认内置模型缓存根） | 内置 Transformers 权重；其下 **`transformers-cache/`**；实际根目录取 **`embedding.builtinModelCacheDir`** |
 | `ai/config.json`、`ai/vector.sqlite`（旧版） | 仅迁移前遗留；启动时尽量迁入 **`ai/data/`** |
 | `CharacterPortrait/`（默认子目录） | 角色立绘与相关 PNG 缓存根（路径受 `characterPortraitCacheDir` 控制；内部按书名再分子目录） |
+
+### API 密钥保险库（`secrets.v1.json`）
+
+主进程 **`secretStorage.ts`** 将敏感字段加密写入 **`userData/ai/secrets.v1.json`**（与 **`config.json`**、向量库分离）。写入经**串行队列**串行化，落盘为 **`secrets.v1.json.tmp` → `rename`** 原子替换，避免关窗/并发写导致整文件损坏。
+
+| 正式 slot（`@shared/secretSlots`） | 内容 |
+| ---------------------------------- | ---- |
+| **`ai.embedding.apiKey`** | 向量嵌入远程 API 单密钥（非按方案） |
+| **`ai.chatProfileKeys`** | 对话方案密钥 JSON：`{ [profileId]: apiKey }` |
+| **`ai.txt2imgProfileKeys`** | 文生图方案密钥 JSON：`{ [profileId]: apiKey }` |
+| **`voiceRead.profileKeys`** | 朗读方案密钥 JSON：`{ [profileId]: { dashscopeApiKey?, minimaxApiKey?, mimoApiKey? } }` |
+
+**已废弃 slot**（仅启动迁移时 **`getDeprecatedSecret`** 读一次，迁入 profile 映射后 **`purgeDeprecatedSecretSlots`** 删除，不再写入）：
+
+| 废弃 slot | 原用途 |
+| --------- | ------ |
+| **`ai.chat.apiKey`** | 旧版对话单密钥 |
+| **`ai.txt2img.apiKey`** | 旧版文生图单密钥 |
+| **`voiceRead.dashscopeApiKey`** | 旧版朗读通义单密钥 |
+
+**持久化时机**（关窗 **`persistSettings()`** / **`persistWindowUnloadState()`** **均不写**保险库）：
+
+| 能力 | 写入路径 |
+| ---- | -------- |
+| AI 对话 / 文生图 / 嵌入 | 设置 **确定** → **`ai:config:set`** → **`saveAiConfig`**（合并 `*ProfileKeys`，**`mergeProfileKeyMapsForSave`**） |
+| 语音朗读 | 设置 **确定** → **`App.vue` `applySettings`** → **`persistVoiceReadSecretsToVault`**（**`secrets:setVoiceReadSecrets`**）；启动时 **`migrateVoiceReadSecretsToVaultIfNeeded`** 补迁 |
+| 启动灌回 | **`hydrateApiKeysFromVault`**（AI）、**`hydrateVoiceReadSecretsFromVault`**（语音）；若 profile id 与映射不对齐，**`reconcileOrphanProfileKeys`** 将孤儿密钥挂回当前活跃方案 |
+
+**localStorage**：**`colorTxt.ui.settings`** 中 **`voiceRead`** 及各方案 **`engineConfig`** **不含**密钥明文；根级 **`engineConfig`** 亦经 **`stripVoiceReadSettingsApiKeysForDisk`** 剥除。运行时内存中保留密钥供合成/对话使用。
+
+**多方案与多密钥**：同一 slot 内的 JSON 按 **方案 id** 索引，**不是**按服务商；同服务商多套方案、多套密钥可并存，互不同步覆盖。
 
 ### `localStorage` 与 `file.meta` 中的 AI 相关键
 
@@ -1833,7 +1868,7 @@ cardShellWrap（悬停抬高 z-index）
 | 文件 | 主要功能 |
 | ---- | -------- |
 | `ReaderSidebar.vue` | 侧栏容器：活动栏含 **笔记**、**AI 助手**、**角色** 等（`constants/readerSidebarTab.ts`）。<br>挂载 **`AnnotationListPanel`**、**`AiAssistantPanel`**、**`CharacterSidebarPanel`** 等；**`askAiWithQuote`** 切 tab 并 **`prefillQuotedText`**；**角色 → 更多 → 卡片效果** 子菜单（`CHARACTER_CARD_TEXTURE_EFFECTS`、分隔线、`AppShellMenuTeleport`）；`v-model:character-card-texture-effect` 与 `App.vue` 同步 |
-| `SettingsPanel.vue` | 设置壳层：确定时校验向量维度、**数据/模型缓存目录迁移**、`configSet` 与 `emit('apply')`；「清除缓存」见数据存储章 |
+| `SettingsPanel.vue` | 设置壳层：确定时校验向量维度、**数据/模型缓存目录迁移**、`configSet`（AI 密钥）与 `emit('apply')`（含 **`persistVoiceReadSecretsToVault`**）；「清除缓存」见数据存储章 |
 | `SettingsTabBar.vue` | 页签含 **`voiceRead`** / `ai` / `vectorModel` / `txt2img` / `skills` / `edit` / `general` / `reading`。<br>`showAiExtensionTabs` 为 false 时隐藏向量模型 / 角色卡 / 技能扩展页签 |
 | `SettingsAIPanel.vue` | 「AI 阅读助手」：总开关；服务商含 **MiniMax**；**配置方案**；对话模型 + **测试连接**；Token 与 **`aiDataCacheDir`**；快速提问等 |
 | `AiMindmapView.vue` | 阅读助手思维导图：侧栏预览 + 全屏交互（markmap）；全部收起/展开、章节标题替换、**全展开** SVG 导出 |
@@ -1902,10 +1937,10 @@ cardShellWrap（悬停抬高 z-index）
 
 | 项目 | 说明 |
 | ---- | ---- |
-| 持久化 | **`colorTxt.ui.settings`** → **`voiceRead`**（引擎、方案 id、单/多音色字段；**不含**密钥明文） |
-| 活跃方案 | **`activeVoiceReadProfileId`**；设置 **确定** 后写入运行时快照 |
+| 持久化 | **`colorTxt.ui.settings`** → **`voiceRead`**（引擎、方案 id、单/多音色字段；**不含**密钥明文；根级 **`engineConfig`** 亦剥密钥） |
+| 活跃方案 | **`activeVoiceReadProfileId`**；设置 **确定** 后写入运行时快照，并 **`persistVoiceReadSecretsToVault`** 写保险库 |
 | 方案内容 | 引擎 id、**`engineConfig`**（模型名）、**`scheme`**、单音色 **`single.voiceId`** 或多音色 **`multi.*`** |
-| API 密钥 | 各方案 **`dashscopeApiKey` / `minimaxApiKey` / `mimoApiKey`** 加密存 **`SECRET_SLOT_VOICE_READ_PROFILE_KEYS`**（JSON）；活跃方案同步旧槽 **`voiceRead.dashscopeApiKey`**（**`registerSecretsIpc`**） |
+| API 密钥 | 各方案 **`dashscopeApiKey` / `minimaxApiKey` / `mimoApiKey`** 加密存 **`voiceRead.profileKeys`**（JSON，按 **profileId** 索引）；**关窗不写**；与 AI 对话/文生图分槽 |
 
 ### 单音色 / 旁白·对白多音色（`scheme`）
 
@@ -1920,23 +1955,26 @@ cardShellWrap（悬停抬高 z-index）
 
 ### API 密钥分开存储（通义 / MiniMax / MiMo）
 
-同一开放平台账号可复用，但应用内**分槽**保存，互不同步：
+同一开放平台账号可复用，但应用内**分槽**保存，互不同步。正式密钥均在 **`userData/ai/secrets.v1.json`**（见 **「API 密钥保险库」**），**`localStorage` 与 `config.json` 不含明文**。
 
-| 功能 | 设置页 | 存储字段 / 密钥槽 |
-| ---- | ------ | ----------------- |
-| 语音朗读 · 通义 TTS | 语音朗读 | `engineConfig.dashscopeApiKey` / **`SECRET_SLOT_VOICE_READ_*`** |
-| 语音朗读 · MiniMax TTS | 语音朗读 | `engineConfig.minimaxApiKey` / 方案 JSON |
-| 语音朗读 · MiMo TTS | 语音朗读 | `engineConfig.mimoApiKey` / 方案 JSON |
-| AI 对话 · MiniMax | AI 阅读助手 | `chat.apiKey` / **`SECRET_SLOT_AI_CHAT_*`** |
-| AI 对话 · 小米 MiMo | AI 阅读助手 | `chat.apiKey` / **`SECRET_SLOT_AI_CHAT_*`**（与 MiMo TTS 分开） |
-| 文生图 · MiniMax | 角色卡 | `txt2img.apiKey` / **`SECRET_SLOT_AI_TXT2IMG_*`** |
-| AI 对话 · 通义 | AI 阅读助手 | `chat.apiKey`（与朗读通义密钥分开） |
-| 文生图 · 通义万相 | 角色卡 | `txt2img.apiKey`（与朗读通义密钥分开） |
+| 功能 | 设置页 | 保险库 slot / 字段 |
+| ---- | ------ | ------------------ |
+| 语音朗读 · 通义 TTS | 语音朗读 | **`voiceRead.profileKeys`** → 方案 `dashscopeApiKey` |
+| 语音朗读 · MiniMax TTS | 语音朗读 | **`voiceRead.profileKeys`** → 方案 `minimaxApiKey` |
+| 语音朗读 · MiMo TTS | 语音朗读 | **`voiceRead.profileKeys`** → 方案 `mimoApiKey` |
+| AI 对话 · MiniMax | AI 阅读助手 | **`ai.chatProfileKeys`** → 方案 `apiKey` |
+| AI 对话 · 小米 MiMo | AI 阅读助手 | **`ai.chatProfileKeys`**（与 MiMo TTS 分开） |
+| 文生图 · MiniMax | 角色卡 | **`ai.txt2imgProfileKeys`** |
+| AI 对话 · 通义 | AI 阅读助手 | **`ai.chatProfileKeys`**（与朗读通义密钥分开） |
+| 文生图 · 通义万相 | 角色卡 | **`ai.txt2imgProfileKeys`**（与朗读通义密钥分开） |
+| 向量嵌入 · 远程 API | 向量模型 | **`ai.embedding.apiKey`** |
 
 ### IPC 与 preload
 
 | 通道 | 说明 |
 | ---- | ---- |
+| **`secrets:setVoiceReadSecrets`** | 写入 **`voiceRead.profileKeys`**（仅 `profileKeys` 参数）；写后清除废弃槽 **`voiceRead.dashscopeApiKey`** |
+| **`secrets:getDeprecated`** / **`secrets:purgeDeprecated`** | 启动迁移读废弃 slot / 清盘 |
 | **`voiceRead:edgeTts`** | Edge 专用历史路径（`voiceReadEdgeTts.ts`） |
 | **`voiceRead:synthesize`** | 统一合成（Provider registry） |
 | **`voiceRead:listVoices`** | 动态音色列表（MiniMax / MiMo 等） |
@@ -1961,7 +1999,7 @@ preload：**`voiceReadSynthesize`**、**`voiceReadListVoices`**、**`voiceReadHe
 
 ## 数据存储说明
 
-应用数据分两类：**渲染进程**使用 Chromium 的 **`localStorage`**（与站点同源隔离，键名定义见 `src/renderer/src/constants/appUi.ts`）；**主进程**将窗口大小与位置写入 **`userData` 目录下的 JSON 文件**（见 `src/main/windowBounds.ts`）。**AI、向量库、角色立绘** 等与阅读助手相关的数据路径与键名另见 **「AI 阅读助手与相关能力」**；**语音朗读** 见 **「语音朗读」**（**`colorTxt.ui.settings.voiceRead`**）。
+应用数据分三类：**渲染进程**使用 Chromium 的 **`localStorage`**（与站点同源隔离，键名定义见 `src/renderer/src/constants/appUi.ts`）；**主进程**将窗口大小与位置写入 **`userData` 目录下的 JSON 文件**（见 `src/main/windowBounds.ts`）；**API 密钥**经主进程 **`secretStorage.ts`** 加密写入 **`userData/ai/secrets.v1.json`**（见 **「API 密钥保险库」**）。**AI、向量库、角色立绘** 等与阅读助手相关的数据路径与键名另见 **「AI 阅读助手与相关能力」**；**语音朗读** 见 **「语音朗读」**（**`colorTxt.ui.settings.voiceRead`**，不含密钥明文）。
 
 ### 渲染进程 `localStorage`
 
@@ -2000,7 +2038,8 @@ preload：**`voiceReadSynthesize`**、**`voiceReadListVoices`**、**`voiceReadHe
 
 **落盘时机（与 `useAppPersistence` 一致）**：
 
-- `colorTxt.ui.settings` 在顶栏/侧栏偏好变更时即时写入（设置弹窗在点「确定」后才会写入）。
+- `colorTxt.ui.settings` 在顶栏/侧栏偏好变更时即时写入（设置弹窗在点「确定」后才会写入）；**不含** API 密钥明文。
+- **API 密钥保险库**：仅在设置 **确定**（AI → **`ai:config:set`**；语音 → **`persistVoiceReadSecretsToVault`**）或启动迁移时写入；**关窗** `persistSettings()` / `persistWindowUnloadState()` **不写** `secrets.v1.json`。
 - `colorTxt.session` 仅在窗口卸载相关路径与 `persistWindowUnloadState` 一并写入。
 - `colorTxt.file.list` 在列表清空、移除项、选择目录合并、从会话恢复列表等变更时写入。
 - `colorTxt.file.meta`：在离开当前文件（切书前的 `remember`、关闭当前文件）或窗口卸载等路径上会调用 `persistFileMeta`；**仅当「当前无打开文件」或 `readingProgressSynced === true` 时才会真正写入 localStorage**，否则跳过写盘，保留磁盘上上一份可靠数据。书签的增删改只先改内存，随上述路径落盘。
@@ -2008,7 +2047,7 @@ preload：**`voiceReadSynthesize`**、**`voiceReadListVoices`**、**`voiceReadHe
 
 ### 清除缓存（设置 → 常规）
 
-- **作用**：在 **「常规」** 页点击 **「清除缓存」**，经 **`window.colorTxt.showMessageBox`** 原生确认后，仅保留 **`colorTxt.ui.settings`**，删除 **`colorTxt.session`**、**`colorTxt.file.list`**、**`colorTxt.recent.files`**、**`colorTxt.file.meta`** 等其余键，然后 **`window.location.reload()`**。
+- **作用**：在 **「常规」** 页点击 **「清除缓存」**，经 **`window.colorTxt.showMessageBox`** 原生确认后，仅保留 **`colorTxt.ui.settings`**，删除 **`colorTxt.session`**、**`colorTxt.file.list`**、**`colorTxt.recent.files`**、**`colorTxt.file.meta`** 等其余 **localStorage** 键，然后 **`window.location.reload()`**。**不**删除 **`userData/ai/secrets.v1.json`** 等主进程保险库文件。
 - **为何需要 `sessionStorage` 标记**：
     - 窗口在 `pagehide` / `beforeunload` 时会调用 `persistWindowUnloadState()`，把内存中的会话、文件列表、最近打开和 meta 写回磁盘。
     - 若在 `localStorage.clear()` 之后直接刷新，卸载事件仍会执行，**会把清缓存前的内存状态再次写入**，导致「清不干净」。
@@ -2022,7 +2061,7 @@ preload：**`voiceReadSynthesize`**、**`voiceReadListVoices`**、**`voiceReadHe
 
 ### 主进程用户数据目录
 
-`userData` 下与 **AI、角色立绘** 相关的文件与目录见 **「AI 阅读助手与相关能力」** →「`userData` 中的 AI 相关路径」。
+`userData` 下与 **AI、角色立绘、API 密钥** 相关的文件与目录见 **「AI 阅读助手与相关能力」** →「`userData` 中的 AI 相关路径」与 **「API 密钥保险库」**。
 
 | 文件                                                   | 说明                                                                                       |
 | ------------------------------------------------------ | ------------------------------------------------------------------------------------------ |

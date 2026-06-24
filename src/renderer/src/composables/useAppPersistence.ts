@@ -122,10 +122,11 @@ import {
   collectVoiceReadProfileApiKeys,
   hydrateVoiceReadProfilesApiKeys,
   mergeVoiceReadProfileSecretsForSave,
-  serializeVoiceReadProfileSecrets,
   stripVoiceReadProfileApiKeysForDisk,
+  stripVoiceReadSettingsApiKeysForDisk,
   type VoiceReadProfile,
 } from "@shared/voiceReadProfiles";
+import { DEPRECATED_SECRET_SLOT_VOICE_READ_DASHSCOPE_API_KEY } from "@shared/secretSlots";
 import { parseProfileKeysBlob } from "@shared/aiEndpointProfiles";
 import { parseProfileSecretsBlob, serializeProfileSecretsBlob } from "@shared/voiceReadEngineConfig";
 import {
@@ -675,8 +676,10 @@ export function useAppPersistence(deps: {
         migrated = true;
       }
 
-      const legacyRes = await window.colorTxt.secrets.getVoiceReadDashScopeApiKey();
-      const legacyKey = legacyRes.apiKey.trim();
+      const legacyRes = await window.colorTxt.secrets.getDeprecated(
+        DEPRECATED_SECRET_SLOT_VOICE_READ_DASHSCOPE_API_KEY,
+      );
+      const legacyKey = legacyRes.ok ? legacyRes.value.trim() : "";
       const activeProfile =
         deps.voiceReadProfiles.value.find((p) => p.id === activeId) ??
         deps.voiceReadProfiles.value[0];
@@ -700,7 +703,6 @@ export function useAppPersistence(deps: {
 
       const flatLegacyKey = deps.voiceReadSettings.value.dashscopeApiKey.trim();
       if (!legacyKey && flatLegacyKey) {
-        await window.colorTxt.secrets.setVoiceReadDashScopeApiKey(flatLegacyKey);
         migrated = true;
       }
       if (!profileKeysBlob.trim() && deps.voiceReadProfiles.value.length > 0) {
@@ -708,20 +710,14 @@ export function useAppPersistence(deps: {
           deps.voiceReadProfiles.value,
         );
         if (Object.keys(collected).length > 0) {
-          await window.colorTxt.secrets.setVoiceReadProfileKeys(
-            serializeVoiceReadProfileSecrets(deps.voiceReadProfiles.value),
-          );
           migrated = true;
         }
       } else if (migrated && profileKeysBlob.trim()) {
-        const existingVault = parseProfileSecretsBlob(profileKeysBlob);
-        const merged = mergeVoiceReadProfileSecretsForSave(
-          deps.voiceReadProfiles.value,
-          existingVault,
-        );
-        await window.colorTxt.secrets.setVoiceReadProfileKeys(
-          serializeProfileSecretsBlob(merged),
-        );
+        migrated = true;
+      }
+
+      if (migrated) {
+        await persistVoiceReadSecretsToVault();
       }
     } catch {
       // ignore
@@ -739,14 +735,10 @@ export function useAppPersistence(deps: {
       profiles,
       existingVault,
     );
-    await window.colorTxt.secrets.setVoiceReadProfileKeys(
-      serializeProfileSecretsBlob(mergedSecrets),
-    );
-    const activeId = deps.activeVoiceReadProfileId.value.trim();
-    const activeKey =
-      profiles.find((p) => p.id === activeId)?.settings.engineConfig
-        .dashscopeApiKey?.trim() ?? "";
-    await window.colorTxt.secrets.setVoiceReadDashScopeApiKey(activeKey);
+    const profileKeysBlob = serializeProfileSecretsBlob(mergedSecrets);
+    await window.colorTxt.secrets.setVoiceReadSecrets({
+      profileKeys: profileKeysBlob,
+    });
   }
 
   function loadPersistedSettings(): {
@@ -1065,11 +1057,12 @@ export function useAppPersistence(deps: {
     } catch {
       // ignore
     }
-    const voiceReadMerged = mergeVoiceReadSettings(deps.voiceReadSettings.value);
+    const voiceReadMerged = stripVoiceReadSettingsApiKeysForDisk(
+      mergeVoiceReadSettings(deps.voiceReadSettings.value),
+    );
     const profilesForDisk = stripVoiceReadProfileApiKeysForDisk(
       normalizeVoiceReadProfilesForSave(deps.voiceReadProfiles.value),
     );
-    void persistVoiceReadSecretsToVault();
     const voiceReadTokenPayload = voiceReadAiSpeakerTokenUsagePersistPayload();
     persistSettingsData(window.localStorage, persistKey, {
       theme: deps.currentTheme.value === "vs" ? "vs" : "vs-dark",
@@ -1173,7 +1166,6 @@ export function useAppPersistence(deps: {
         activeProfileId: deps.activeVoiceReadProfileId.value.trim(),
         profiles: profilesForDisk,
         ...voiceReadMerged,
-        dashscopeApiKey: "",
         aiSpeakerTokenUsage: voiceReadTokenPayload.usage,
         aiSpeakerTokenUsageAvailable: voiceReadTokenPayload.available,
       },
@@ -1232,7 +1224,7 @@ export function useAppPersistence(deps: {
       ebookConvertOutputDirKeyPresent,
       characterPortraitCacheDirKeyPresent,
     } = loadPersistedSettings();
-    const migratedVoiceSecret = await hydrateVoiceReadSecretsFromVault();
+    await hydrateVoiceReadSecretsFromVault();
     settingsLoaded.value = true;
     let needDefaultSettingsPersist = false;
     if (!ebookConvertOutputDirKeyPresent) {
@@ -1256,7 +1248,7 @@ export function useAppPersistence(deps: {
       }
       needDefaultSettingsPersist = true;
     }
-    if (needDefaultSettingsPersist || migratedVoiceSecret) {
+    if (needDefaultSettingsPersist) {
       persistSettings();
     }
     loadRecentFiles();
@@ -1285,6 +1277,7 @@ export function useAppPersistence(deps: {
     clearBookmarks,
     loadPersistedSettings,
     persistSettings,
+    persistVoiceReadSecretsToVault,
     persistReadingSessionSnapshot,
     persistWindowUnloadState,
     persistFileListCache,

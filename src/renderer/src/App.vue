@@ -1155,6 +1155,7 @@ const persistence = useAppPersistence({
 });
 const {
   persistSettings,
+  persistVoiceReadSecretsToVault,
   clearRecentFiles,
   persistWindowUnloadState,
   persistFileListCache,
@@ -2864,6 +2865,7 @@ async function applySettings(payload: SettingsApplyPayload) {
   voiceReadSettings.value = mergeVoiceReadSettings(payload.voiceRead);
   voiceReadProfiles.value = cloneVoiceReadProfiles(payload.voiceReadProfiles);
   activeVoiceReadProfileId.value = payload.activeVoiceReadProfileId.trim();
+  await persistVoiceReadSecretsToVault();
   aiAssistantConfigSyncNonce.value += 1;
   persistSettings();
   if (!payload.restoreSessionOnStartup) {

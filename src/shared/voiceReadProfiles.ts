@@ -374,21 +374,34 @@ export function hydrateVoiceReadProfilesApiKeys(
   return migrated;
 }
 
+function stripVoiceReadProfileSettingsApiKeys(
+  settings: VoiceReadProfileSettings,
+): VoiceReadProfileSettings {
+  return {
+    ...settings,
+    dashscopeApiKey: "",
+    engineConfig: {
+      ...settings.engineConfig,
+      dashscopeApiKey: undefined,
+      minimaxApiKey: undefined,
+      mimoApiKey: undefined,
+    },
+  };
+}
+
+/** localStorage 落盘：剥掉方案与根级快照中的 API 密钥明文 */
+export function stripVoiceReadSettingsApiKeysForDisk(
+  settings: VoiceReadProfileSettings,
+): VoiceReadProfileSettings {
+  return stripVoiceReadProfileSettingsApiKeys(settings);
+}
+
 export function stripVoiceReadProfileApiKeysForDisk(
   profiles: VoiceReadProfile[],
 ): VoiceReadProfile[] {
   return profiles.map((p) => ({
     ...p,
-    settings: {
-      ...p.settings,
-      dashscopeApiKey: "",
-      engineConfig: {
-        ...p.settings.engineConfig,
-        dashscopeApiKey: undefined,
-        minimaxApiKey: undefined,
-        mimoApiKey: undefined,
-      },
-    },
+    settings: stripVoiceReadProfileSettingsApiKeys(p.settings),
   }));
 }
 

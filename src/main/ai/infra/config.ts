@@ -24,10 +24,10 @@ import {
   normalizeWordcloudMaxWords,
 } from "@shared/aiTypes";
 import {
-  SECRET_SLOT_AI_CHAT_API_KEY,
+  DEPRECATED_SECRET_SLOT_AI_CHAT_API_KEY,
+  DEPRECATED_SECRET_SLOT_AI_TXT2IMG_API_KEY,
   SECRET_SLOT_AI_CHAT_PROFILE_KEYS,
   SECRET_SLOT_AI_EMBEDDING_API_KEY,
-  SECRET_SLOT_AI_TXT2IMG_API_KEY,
   SECRET_SLOT_AI_TXT2IMG_PROFILE_KEYS,
   type SecretSlotId,
 } from "@shared/secretSlots";
@@ -41,7 +41,7 @@ import {
   upgradeLegacyAiDataLayoutIfNeeded,
   writeDataCacheRootBootstrap,
 } from "./dataFs";
-import { getSecret, setSecretsBatch } from "../../secretStorage";
+import { getDeprecatedSecret, getSecret, purgeDeprecatedSecretSlots, setSecretsBatch } from "../../secretStorage";
 
 /** IPC / 磁盘读取后的不完整对象也可合并为完整 AIConfig */
 export function mergeAiConfigWithDefaults(raw: unknown): AIConfig {
@@ -128,9 +128,13 @@ async function hydrateApiKeysFromVault(cfg: AIConfig): Promise<{
   let migratedPlaintext = false;
   let profileKeysMigrated = false;
 
-  const chatVault = await getSecret(SECRET_SLOT_AI_CHAT_API_KEY);
+  const chatVault = await getDeprecatedSecret(
+    DEPRECATED_SECRET_SLOT_AI_CHAT_API_KEY,
+  );
   const embedVault = await getSecret(SECRET_SLOT_AI_EMBEDDING_API_KEY);
-  const txt2imgVault = await getSecret(SECRET_SLOT_AI_TXT2IMG_API_KEY);
+  const txt2imgVault = await getDeprecatedSecret(
+    DEPRECATED_SECRET_SLOT_AI_TXT2IMG_API_KEY,
+  );
   const profileMaps = await loadProfileKeyMaps();
   const chatProfileKeys = { ...profileMaps.chat };
   const txt2imgProfileKeys = { ...profileMaps.txt2img };
@@ -221,35 +225,24 @@ async function hydrateApiKeysFromVault(cfg: AIConfig): Promise<{
     migratedPlaintext = true;
   }
 
-  const activeChatKey =
-    chatProfileKeys[next.activeChatProfileId] ?? next.chat.apiKey;
-  const activeTxt2ImgKey =
-    txt2imgProfileKeys[next.activeTxt2ImgProfileId] ?? next.txt2img.apiKey;
+  const hadLegacyVault =
+    Boolean(chatVault?.trim()) || Boolean(txt2imgVault?.trim());
 
-  if (chatVault && activeChatKey && chatVault !== activeChatKey) {
-    profileKeysMigrated = true;
-  }
-  if (txt2imgVault && activeTxt2ImgKey && txt2imgVault !== activeTxt2ImgKey) {
-    profileKeysMigrated = true;
-  }
-
-  if (migratedPlaintext || profileKeysMigrated) {
+  if (migratedPlaintext || profileKeysMigrated || hadLegacyVault) {
     const migrationBatch: Partial<Record<SecretSlotId, string>> = {
       [SECRET_SLOT_AI_CHAT_PROFILE_KEYS]:
         serializeProfileKeysBlob(chatProfileKeys),
       [SECRET_SLOT_AI_TXT2IMG_PROFILE_KEYS]:
         serializeProfileKeysBlob(txt2imgProfileKeys),
     };
-    if (activeChatKey.trim()) {
-      migrationBatch[SECRET_SLOT_AI_CHAT_API_KEY] = activeChatKey;
-    }
     if (next.embedding.apiKey.trim()) {
       migrationBatch[SECRET_SLOT_AI_EMBEDDING_API_KEY] = next.embedding.apiKey;
     }
-    if (activeTxt2ImgKey.trim()) {
-      migrationBatch[SECRET_SLOT_AI_TXT2IMG_API_KEY] = activeTxt2ImgKey;
-    }
     await setSecretsBatch(migrationBatch, { skipEmpty: true });
+    await purgeDeprecatedSecretSlots([
+      DEPRECATED_SECRET_SLOT_AI_CHAT_API_KEY,
+      DEPRECATED_SECRET_SLOT_AI_TXT2IMG_API_KEY,
+    ]);
   }
 
   return { cfg: next, migratedPlaintext, profileKeysMigrated };
@@ -310,14 +303,16 @@ export async function saveAiConfig(cfg: AIConfig): Promise<void> {
   );
 
   await setSecretsBatch({
-    [SECRET_SLOT_AI_CHAT_API_KEY]: next.chat.apiKey,
     [SECRET_SLOT_AI_EMBEDDING_API_KEY]: next.embedding.apiKey,
-    [SECRET_SLOT_AI_TXT2IMG_API_KEY]: next.txt2img.apiKey,
     [SECRET_SLOT_AI_CHAT_PROFILE_KEYS]:
       serializeProfileKeysBlob(chatProfileKeys),
     [SECRET_SLOT_AI_TXT2IMG_PROFILE_KEYS]:
       serializeProfileKeysBlob(txt2imgProfileKeys),
   });
+  await purgeDeprecatedSecretSlots([
+    DEPRECATED_SECRET_SLOT_AI_CHAT_API_KEY,
+    DEPRECATED_SECRET_SLOT_AI_TXT2IMG_API_KEY,
+  ]);
   await writeConfigJson(next);
 }
 
