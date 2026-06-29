@@ -138,6 +138,9 @@ import {
   hydrateVoiceReadAiSpeakerTokenUsage,
   voiceReadAiSpeakerTokenUsagePersistPayload,
 } from "../services/voiceRead/voiceReadAiSpeakerTokenUsage";
+import {
+  type AITokenUsageTotals,
+} from "@shared/aiTokenUsage";
 import type { WordcloudAngleMode } from "../constants/wordcloudUi";
 import type { WordcloudPaletteId } from "../constants/wordcloudPalettes";
 import {
@@ -1034,7 +1037,7 @@ export function useAppPersistence(deps: {
     hydrateVoiceReadAiSpeakerTokenUsage({
       usage:
         vrRaw && typeof vrRaw === "object"
-          ? (vrRaw as Record<string, unknown>).aiSpeakerTokenUsage
+          ? (vrRaw as Record<string, unknown>).aiSpeakerTokenUsage as Partial<AITokenUsageTotals> | null | undefined
           : undefined,
       available:
         vrRaw && typeof vrRaw === "object"
